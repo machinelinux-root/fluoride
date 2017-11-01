@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- *  Copyright (C) 1999-2012 Broadcom Corporation
+ *  Copyright 1999-2012 Broadcom Corporation
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -39,8 +39,6 @@
 #include "l2cdefs.h"
 #include "osi/include/log.h"
 #include "osi/include/osi.h"
-
-extern fixed_queue_t* btu_general_alarm_queue;
 
 /******************************************************************************/
 /*            L O C A L    F U N C T I O N     P R O T O T Y P E S            */
@@ -103,9 +101,8 @@ void l2c_rcv_acl_data(BT_HDR* p_msg) {
         list_append(l2cb.rcv_pending_q, p_msg);
 
         if (list_length(l2cb.rcv_pending_q) == 1) {
-          alarm_set_on_queue(l2cb.receive_hold_timer, BT_1SEC_TIMEOUT_MS,
-                             l2c_receive_hold_timer_timeout, NULL,
-                             btu_general_alarm_queue);
+          alarm_set_on_mloop(l2cb.receive_hold_timer, BT_1SEC_TIMEOUT_MS,
+                             l2c_receive_hold_timer_timeout, NULL);
         }
 
         return;
@@ -130,6 +127,13 @@ void l2c_rcv_acl_data(BT_HDR* p_msg) {
   STREAM_TO_UINT16(hci_len, p);
   p_msg->offset += 4;
 
+  if (hci_len < L2CAP_PKT_OVERHEAD) {
+    /* Must receive at least the L2CAP length and CID */
+    L2CAP_TRACE_WARNING("L2CAP - got incorrect hci header");
+    osi_free(p_msg);
+    return;
+  }
+
   /* Extract the length and CID */
   STREAM_TO_UINT16(l2cap_len, p);
   STREAM_TO_UINT16(rcv_cid, p);
@@ -152,16 +156,8 @@ void l2c_rcv_acl_data(BT_HDR* p_msg) {
     }
   }
 
-  if (hci_len >=
-      L2CAP_PKT_OVERHEAD) /* Must receive at least the L2CAP length and CID.*/
-  {
-    p_msg->len = hci_len - L2CAP_PKT_OVERHEAD;
-    p_msg->offset += L2CAP_PKT_OVERHEAD;
-  } else {
-    L2CAP_TRACE_WARNING("L2CAP - got incorrect hci header");
-    osi_free(p_msg);
-    return;
-  }
+  p_msg->len = hci_len - L2CAP_PKT_OVERHEAD;
+  p_msg->offset += L2CAP_PKT_OVERHEAD;
 
   if (l2cap_len != p_msg->len) {
     L2CAP_TRACE_WARNING("L2CAP - bad length in pkt. Exp: %d  Act: %d",
@@ -179,14 +175,7 @@ void l2c_rcv_acl_data(BT_HDR* p_msg) {
     /* process_connectionless_data (p_lcb); */
     STREAM_TO_UINT16(psm, p);
     L2CAP_TRACE_DEBUG("GOT CONNECTIONLESS DATA PSM:%d", psm);
-
-#if (L2CAP_UCD_INCLUDED == TRUE)
-    /* if it is not broadcast, check UCD registration */
-    if (l2c_ucd_check_rx_pkts(p_lcb, p_msg)) {
-      /* nothing to do */
-    } else
-#endif
-      osi_free(p_msg);
+    osi_free(p_msg);
   } else if (rcv_cid == L2CAP_BLE_SIGNALLING_CID) {
     l2cble_process_sig_cmd(p_lcb, p, l2cap_len);
     osi_free(p_msg);
@@ -290,14 +279,22 @@ static void process_l2cap_cmd(tL2C_LCB* p_lcb, uint8_t* p, uint16_t pkt_len) {
   /* An L2CAP packet may contain multiple commands */
   while (true) {
     /* Smallest command is 4 bytes */
-    if ((p = p_next_cmd) > (p_pkt_end - 4)) break;
+    p = p_next_cmd;
+    if (p > (p_pkt_end - 4)) break;
 
     STREAM_TO_UINT8(cmd_code, p);
     STREAM_TO_UINT8(id, p);
     STREAM_TO_UINT16(cmd_len, p);
 
+    if (cmd_len > BT_SMALL_BUFFER_SIZE) {
+      L2CAP_TRACE_WARNING("L2CAP - Invalid MTU Size");
+      l2cu_send_peer_cmd_reject(p_lcb, L2CAP_CMD_REJ_MTU_EXCEEDED, id, 0, 0);
+      return;
+    }
+
     /* Check command length does not exceed packet length */
-    if ((p_next_cmd = p + cmd_len) > p_pkt_end) {
+    p_next_cmd = p + cmd_len;
+    if (p_next_cmd > p_pkt_end) {
       L2CAP_TRACE_WARNING("Command len bad  pkt_len: %d  cmd_len: %d  code: %d",
                           pkt_len, cmd_len, cmd_code);
       break;
@@ -336,8 +333,8 @@ static void process_l2cap_cmd(tL2C_LCB* p_lcb, uint8_t* p, uint16_t pkt_len) {
               rcid);
 
           /* Remote CID invalid. Treat as a disconnect */
-          if (((p_ccb = l2cu_find_ccb_by_cid(p_lcb, lcid)) != NULL) &&
-              (p_ccb->remote_cid == rcid)) {
+          p_ccb = l2cu_find_ccb_by_cid(p_lcb, lcid);
+          if ((p_ccb != NULL) && (p_ccb->remote_cid == rcid)) {
             /* Fake link disconnect - no reply is generated */
             l2c_csm_execute(p_ccb, L2CEVT_LP_DISCONNECT_IND, NULL);
           }
@@ -350,7 +347,7 @@ static void process_l2cap_cmd(tL2C_LCB* p_lcb, uint8_t* p, uint16_t pkt_len) {
 
           p_lcb->w4_info_rsp = false;
           ci.status = HCI_SUCCESS;
-          memcpy(ci.bd_addr, p_lcb->remote_bd_addr, sizeof(BD_ADDR));
+          ci.bd_addr = p_lcb->remote_bd_addr;
 
           /* For all channels, send the event through their FSMs */
           for (p_ccb = p_lcb->ccb_queue.p_first_ccb; p_ccb;
@@ -626,7 +623,7 @@ static void process_l2cap_cmd(tL2C_LCB* p_lcb, uint8_t* p, uint16_t pkt_len) {
         break;
 
       case L2CAP_CMD_ECHO_REQ:
-        l2cu_send_peer_echo_rsp(p_lcb, id, NULL, 0);
+        l2cu_send_peer_echo_rsp(p_lcb, id, p, cmd_len);
         break;
 
       case L2CAP_CMD_ECHO_RSP:
@@ -680,16 +677,8 @@ static void process_l2cap_cmd(tL2C_LCB* p_lcb, uint8_t* p, uint16_t pkt_len) {
           l2cu_process_fixed_chnl_resp(p_lcb);
         }
 #endif
-#if (L2CAP_UCD_INCLUDED == TRUE)
-        else if (info_type == L2CAP_CONNLESS_MTU_INFO_TYPE) {
-          if (result == L2CAP_INFO_RESP_RESULT_SUCCESS) {
-            STREAM_TO_UINT16(p_lcb->ucd_mtu, p);
-          }
-        }
-#endif
-
         ci.status = HCI_SUCCESS;
-        memcpy(ci.bd_addr, p_lcb->remote_bd_addr, sizeof(BD_ADDR));
+        ci.bd_addr = p_lcb->remote_bd_addr;
         for (p_ccb = p_lcb->ccb_queue.p_first_ccb; p_ccb;
              p_ccb = p_ccb->p_next_ccb) {
           l2c_csm_execute(p_ccb, L2CEVT_L2CAP_INFO_RSP, &ci);
@@ -740,9 +729,8 @@ void l2c_process_held_packets(bool timed_out) {
 
   /* If anyone still in the queue, restart the timeout */
   if (!list_is_empty(l2cb.rcv_pending_q)) {
-    alarm_set_on_queue(l2cb.receive_hold_timer, BT_1SEC_TIMEOUT_MS,
-                       l2c_receive_hold_timer_timeout, NULL,
-                       btu_general_alarm_queue);
+    alarm_set_on_mloop(l2cb.receive_hold_timer, BT_1SEC_TIMEOUT_MS,
+                       l2c_receive_hold_timer_timeout, NULL);
   }
 }
 
@@ -806,10 +794,8 @@ void l2c_init(void) {
                                   L2CAP_FIXED_CHNL_SMP_BIT;
 
   l2cb.rcv_pending_q = list_new(NULL);
-  if (l2cb.rcv_pending_q == NULL)
-    LOG_ERROR(LOG_TAG,
-              "%s unable to allocate memory for link layer control block",
-              __func__);
+  CHECK(l2cb.rcv_pending_q != NULL);
+
   l2cb.receive_hold_timer = alarm_new("l2c.receive_hold_timer");
 }
 
@@ -876,8 +862,9 @@ uint8_t l2c_data_write(uint16_t cid, BT_HDR* p_data, uint16_t flags) {
 
   if (p_data->len > mtu) {
     L2CAP_TRACE_WARNING(
-        "L2CAP - CID: 0x%04x  cannot send message bigger than peer's mtu size",
-        cid);
+        "L2CAP - CID: 0x%04x  cannot send message bigger than peer's mtu size: "
+        "len=%u mtu=%u",
+        cid, p_data->len, mtu);
     osi_free(p_data);
     return (L2CAP_DW_FAILED);
   }

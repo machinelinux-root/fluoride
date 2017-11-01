@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- *  Copyright (C) 2003-2014 Broadcom Corporation
+ *  Copyright 2003-2014 Broadcom Corporation
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -52,32 +52,36 @@
 #include "gap_api.h"
 #endif
 
-static void bta_dm_inq_results_cb(tBTM_INQ_RESULTS* p_inq, uint8_t* p_eir);
+using bluetooth::Uuid;
+
+static void bta_dm_inq_results_cb(tBTM_INQ_RESULTS* p_inq, uint8_t* p_eir,
+                                  uint16_t eir_len);
 static void bta_dm_inq_cmpl_cb(void* p_result);
-static void bta_dm_service_search_remname_cback(BD_ADDR bd_addr, DEV_CLASS dc,
-                                                BD_NAME bd_name);
+static void bta_dm_service_search_remname_cback(const RawAddress& bd_addr,
+                                                DEV_CLASS dc, BD_NAME bd_name);
 static void bta_dm_remname_cback(tBTM_REMOTE_DEV_NAME* p_remote_name);
-static void bta_dm_find_services(BD_ADDR bd_addr);
+static void bta_dm_find_services(const RawAddress& bd_addr);
 static void bta_dm_discover_next_device(void);
 static void bta_dm_sdp_callback(uint16_t sdp_status);
-static uint8_t bta_dm_authorize_cback(BD_ADDR bd_addr, DEV_CLASS dev_class,
-                                      BD_NAME bd_name, uint8_t* service_name,
-                                      uint8_t service_id, bool is_originator);
-static uint8_t bta_dm_pin_cback(BD_ADDR bd_addr, DEV_CLASS dev_class,
+static uint8_t bta_dm_authorize_cback(const RawAddress& bd_addr,
+                                      DEV_CLASS dev_class, BD_NAME bd_name,
+                                      uint8_t* service_name, uint8_t service_id,
+                                      bool is_originator);
+static uint8_t bta_dm_pin_cback(const RawAddress& bd_addr, DEV_CLASS dev_class,
                                 BD_NAME bd_name, bool min_16_digit);
-static uint8_t bta_dm_new_link_key_cback(BD_ADDR bd_addr, DEV_CLASS dev_class,
-                                         BD_NAME bd_name, LINK_KEY key,
-                                         uint8_t key_type);
-static uint8_t bta_dm_authentication_complete_cback(BD_ADDR bd_addr,
+static uint8_t bta_dm_new_link_key_cback(const RawAddress& bd_addr,
+                                         DEV_CLASS dev_class, BD_NAME bd_name,
+                                         LINK_KEY key, uint8_t key_type);
+static uint8_t bta_dm_authentication_complete_cback(const RawAddress& bd_addr,
                                                     DEV_CLASS dev_class,
                                                     BD_NAME bd_name,
                                                     int result);
-static void bta_dm_local_name_cback(BD_ADDR bd_addr);
+static void bta_dm_local_name_cback(const RawAddress& bd_addr);
 static bool bta_dm_check_av(uint16_t event);
 static void bta_dm_bl_change_cback(tBTM_BL_EVENT_DATA* p_data);
 
 static void bta_dm_policy_cback(tBTA_SYS_CONN_STATUS status, uint8_t id,
-                                uint8_t app_id, BD_ADDR peer_addr);
+                                uint8_t app_id, const RawAddress* peer_addr);
 
 /* Extended Inquiry Response */
 static uint8_t bta_dm_sp_cback(tBTM_SP_EVT event, tBTM_SP_EVT_DATA* p_data);
@@ -91,25 +95,25 @@ static void bta_dm_eir_search_services(tBTM_INQ_RESULTS* p_result,
 static void bta_dm_search_timer_cback(void* data);
 static void bta_dm_disable_conn_down_timer_cback(void* data);
 static void bta_dm_rm_cback(tBTA_SYS_CONN_STATUS status, uint8_t id,
-                            uint8_t app_id, BD_ADDR peer_addr);
+                            uint8_t app_id, const RawAddress* peer_addr);
 static void bta_dm_adjust_roles(bool delay_role_switch);
 static char* bta_dm_get_remname(void);
 static void bta_dm_bond_cancel_complete_cback(tBTM_STATUS result);
 
-static bool bta_dm_read_remote_device_name(BD_ADDR bd_addr,
+static bool bta_dm_read_remote_device_name(const RawAddress& bd_addr,
                                            tBT_TRANSPORT transport);
-static void bta_dm_discover_device(BD_ADDR remote_bd_addr);
+static void bta_dm_discover_device(const RawAddress& remote_bd_addr);
 
 static void bta_dm_sys_hw_cback(tBTA_SYS_HW_EVT status);
 static void bta_dm_disable_search_and_disc(void);
 
-static uint8_t bta_dm_ble_smp_cback(tBTM_LE_EVT event, BD_ADDR bda,
+static uint8_t bta_dm_ble_smp_cback(tBTM_LE_EVT event, const RawAddress& bda,
                                     tBTM_LE_EVT_DATA* p_data);
 static void bta_dm_ble_id_key_cback(uint8_t key_type,
                                     tBTM_BLE_LOCAL_KEYS* p_key);
 static void bta_dm_gattc_register(void);
-static void btm_dm_start_gatt_discovery(BD_ADDR bd_addr);
-static void bta_dm_cancel_gatt_discovery(BD_ADDR bd_addr);
+static void btm_dm_start_gatt_discovery(const RawAddress& bd_addr);
+static void bta_dm_cancel_gatt_discovery(const RawAddress& bd_addr);
 static void bta_dm_gattc_callback(tBTA_GATTC_EVT event, tBTA_GATTC* p_data);
 extern tBTA_DM_CONTRL_STATE bta_dm_pm_obtain_controller_state(void);
 
@@ -142,9 +146,10 @@ static void bta_dm_ctrl_features_rd_cmpl_cback(tBTM_STATUS result);
 #define BTA_DM_SWITCH_DELAY_TIMER_MS 500
 #endif
 
-static void bta_dm_reset_sec_dev_pending(BD_ADDR remote_bd_addr);
-static void bta_dm_remove_sec_dev_entry(BD_ADDR remote_bd_addr);
-static void bta_dm_observe_results_cb(tBTM_INQ_RESULTS* p_inq, uint8_t* p_eir);
+static void bta_dm_reset_sec_dev_pending(const RawAddress& remote_bd_addr);
+static void bta_dm_remove_sec_dev_entry(const RawAddress& remote_bd_addr);
+static void bta_dm_observe_results_cb(tBTM_INQ_RESULTS* p_inq, uint8_t* p_eir,
+                                      uint16_t eir_len);
 static void bta_dm_observe_cmpl_cb(void* p_result);
 static void bta_dm_delay_role_switch_cback(void* data);
 static void bta_dm_disable_timer_cback(void* data);
@@ -231,11 +236,7 @@ const tBTM_APPL_INFO bta_security = {&bta_dm_authorize_cback,
                                      &bta_dm_new_link_key_cback,
                                      &bta_dm_authentication_complete_cback,
                                      &bta_dm_bond_cancel_complete_cback,
-#if (BTM_LOCAL_IO_CAPS != BTM_IO_CAP_NONE)
                                      &bta_dm_sp_cback,
-#else
-                                     NULL
-#endif
                                      &bta_dm_ble_smp_cback,
                                      &bta_dm_ble_id_key_cback};
 
@@ -243,7 +244,6 @@ const tBTM_APPL_INFO bta_security = {&bta_dm_authorize_cback,
 uint8_t g_disc_raw_data_buf[MAX_DISC_RAW_DATA_BUF];
 
 extern DEV_CLASS local_device_default_class;
-extern fixed_queue_t* btu_bta_alarm_queue;
 
 /*******************************************************************************
  *
@@ -256,17 +256,16 @@ extern fixed_queue_t* btu_bta_alarm_queue;
  *
  ******************************************************************************/
 void bta_dm_enable(tBTA_DM_MSG* p_data) {
-  tBTA_DM_ENABLE enable_event;
 
   /* if already in use, return an error */
-  if (bta_dm_cb.is_bta_dm_active == true) {
+  if (bta_dm_cb.is_bta_dm_active) {
+    tBTA_DM_SEC enable_event;
     APPL_TRACE_WARNING("%s Device already started by another application",
                        __func__);
-    memset(&enable_event, 0, sizeof(tBTA_DM_ENABLE));
-    enable_event.status = BTA_FAILURE;
+    memset(&enable_event, 0, sizeof(tBTA_DM_SEC));
+    enable_event.enable.status = BTA_FAILURE;
     if (p_data->enable.p_sec_cback != NULL)
-      p_data->enable.p_sec_cback(BTA_DM_ENABLE_EVT,
-                                 (tBTA_DM_SEC*)&enable_event);
+      p_data->enable.p_sec_cback(BTA_DM_ENABLE_EVT, &enable_event);
     return;
   }
 
@@ -380,9 +379,10 @@ static void bta_dm_sys_hw_cback(tBTA_SYS_HW_EVT status) {
     bta_dm_cb.is_bta_dm_active = false;
   } else if (status == BTA_SYS_HW_ON_EVT) {
     /* FIXME: We should not unregister as the SYS shall invoke this callback on
-    * a H/W error.
-    * We need to revisit when this platform has more than one BLuetooth H/W chip
-    */
+     * a H/W error.
+     * We need to revisit when this platform has more than one BLuetooth H/W
+     * chip
+     */
     // bta_sys_hw_unregister( BTA_SYS_HW_BLUETOOTH);
 
     /* save security callback */
@@ -422,9 +422,9 @@ static void bta_dm_sys_hw_cback(tBTA_SYS_HW_EVT status) {
       BTM_BleLoadLocalKeys(BTA_BLE_LOCAL_KEY_TYPE_ID,
                            (tBTM_BLE_LOCAL_KEYS*)&id_key);
     }
-    bta_dm_search_cb.conn_id = BTA_GATT_INVALID_CONN_ID;
+    bta_dm_search_cb.conn_id = GATT_INVALID_CONN_ID;
 
-    BTM_SecRegister((tBTM_APPL_INFO*)&bta_security);
+    BTM_SecRegister(&bta_security);
     BTM_SetDefaultLinkSuperTout(p_bta_dm_cfg->link_timeout);
     BTM_WritePageTimeout(p_bta_dm_cfg->page_timeout);
     bta_dm_cb.cur_policy = p_bta_dm_cfg->policy_settings;
@@ -480,8 +480,8 @@ static void bta_dm_sys_hw_cback(tBTA_SYS_HW_EVT status) {
 void bta_dm_disable(UNUSED_ATTR tBTA_DM_MSG* p_data) {
   /* Set l2cap idle timeout to 0 (so BTE immediately disconnects ACL link after
    * last channel is closed) */
-  L2CA_SetIdleTimeoutByBdAddr((uint8_t*)BT_BD_ANY, 0, BT_TRANSPORT_BR_EDR);
-  L2CA_SetIdleTimeoutByBdAddr((uint8_t*)BT_BD_ANY, 0, BT_TRANSPORT_LE);
+  L2CA_SetIdleTimeoutByBdAddr(RawAddress::kAny, 0, BT_TRANSPORT_BR_EDR);
+  L2CA_SetIdleTimeoutByBdAddr(RawAddress::kAny, 0, BT_TRANSPORT_LE);
 
   /* disable all active subsystems */
   bta_sys_disable(BTA_SYS_HW_BLUETOOTH);
@@ -503,16 +503,14 @@ void bta_dm_disable(UNUSED_ATTR tBTA_DM_MSG* p_data) {
      */
     APPL_TRACE_WARNING("%s BTA_DISABLE_DELAY set to %d ms", __func__,
                        BTA_DISABLE_DELAY);
-    alarm_set_on_queue(bta_dm_cb.disable_timer, BTA_DISABLE_DELAY,
-                       bta_dm_disable_conn_down_timer_cback, NULL,
-                       btu_bta_alarm_queue);
+    alarm_set_on_mloop(bta_dm_cb.disable_timer, BTA_DISABLE_DELAY,
+                       bta_dm_disable_conn_down_timer_cback, NULL);
 #else
     bta_dm_disable_conn_down_timer_cback(NULL);
 #endif
   } else {
-    alarm_set_on_queue(bta_dm_cb.disable_timer, BTA_DM_DISABLE_TIMER_MS,
-                       bta_dm_disable_timer_cback, UINT_TO_PTR(0),
-                       btu_bta_alarm_queue);
+    alarm_set_on_mloop(bta_dm_cb.disable_timer, BTA_DM_DISABLE_TIMER_MS,
+                       bta_dm_disable_timer_cback, UINT_TO_PTR(0));
   }
 }
 
@@ -548,9 +546,9 @@ static void bta_dm_disable_timer_cback(void* data) {
        need
         to be sent out to avoid jave layer disable timeout */
     if (trigger_disc) {
-      alarm_set_on_queue(
-          bta_dm_cb.disable_timer, BTA_DM_DISABLE_TIMER_RETRIAL_MS,
-          bta_dm_disable_timer_cback, UINT_TO_PTR(1), btu_bta_alarm_queue);
+      alarm_set_on_mloop(bta_dm_cb.disable_timer,
+                         BTA_DM_DISABLE_TIMER_RETRIAL_MS,
+                         bta_dm_disable_timer_cback, UINT_TO_PTR(1));
     }
   } else {
     bta_dm_cb.disabling = false;
@@ -653,7 +651,7 @@ void bta_dm_set_visibility(tBTA_DM_MSG* p_data) {
  * Description      Removes device, Disconnects ACL link if required.
  ***
  ******************************************************************************/
-void bta_dm_process_remove_device(BD_ADDR bd_addr) {
+void bta_dm_process_remove_device(const RawAddress& bd_addr) {
   /* need to remove all pending background connection before unpair */
   BTA_GATTC_CancelOpen(0, bd_addr, false);
 
@@ -664,7 +662,8 @@ void bta_dm_process_remove_device(BD_ADDR bd_addr) {
 
   if (bta_dm_cb.p_sec_cback) {
     tBTA_DM_SEC sec_event;
-    bdcpy(sec_event.link_down.bd_addr, bd_addr);
+    sec_event.link_down.bd_addr = bd_addr;
+    ;
     /* No connection, set status to success (acl disc code not valid) */
     sec_event.link_down.status = HCI_SUCCESS;
     bta_dm_cb.p_sec_cback(BTA_DM_DEV_UNPAIRED_EVT, &sec_event);
@@ -683,8 +682,7 @@ void bta_dm_remove_device(tBTA_DM_MSG* p_data) {
   bool continue_delete_other_dev = false;
   if (p_dev == NULL) return;
 
-  BD_ADDR other_address;
-  bdcpy(other_address, p_dev->bd_addr);
+  RawAddress other_address = p_dev->bd_addr;
 
   /* If ACL exists for the device in the remove_bond message*/
   bool continue_delete_dev = false;
@@ -699,8 +697,7 @@ void bta_dm_remove_device(tBTA_DM_MSG* p_data) {
     /* Take the link down first, and mark the device for removal when
      * disconnected */
     for (int i = 0; i < bta_dm_cb.device_list.count; i++) {
-      if (!bdcmp(bta_dm_cb.device_list.peer_device[i].peer_bdaddr,
-                 p_dev->bd_addr)) {
+      if (bta_dm_cb.device_list.peer_device[i].peer_bdaddr == p_dev->bd_addr) {
         uint8_t transport = BT_TRANSPORT_BR_EDR;
 
         transport = bta_dm_cb.device_list.peer_device[i].transport;
@@ -726,16 +723,16 @@ void bta_dm_remove_device(tBTA_DM_MSG* p_data) {
   // device
   // if different address
   if ((other_transport &&
-       (BTM_ReadConnectedTransportAddress(other_address, other_transport))) ||
+       (BTM_ReadConnectedTransportAddress(&other_address, other_transport))) ||
       (!other_transport &&
-       (BTM_ReadConnectedTransportAddress(other_address, BT_TRANSPORT_BR_EDR) ||
-        BTM_ReadConnectedTransportAddress(other_address, BT_TRANSPORT_LE)))) {
+       (BTM_ReadConnectedTransportAddress(&other_address,
+                                          BT_TRANSPORT_BR_EDR) ||
+        BTM_ReadConnectedTransportAddress(&other_address, BT_TRANSPORT_LE)))) {
     continue_delete_other_dev = false;
     /* Take the link down first, and mark the device for removal when
      * disconnected */
     for (int i = 0; i < bta_dm_cb.device_list.count; i++) {
-      if (!bdcmp(bta_dm_cb.device_list.peer_device[i].peer_bdaddr,
-                 other_address)) {
+      if (bta_dm_cb.device_list.peer_device[i].peer_bdaddr == other_address) {
         bta_dm_cb.device_list.peer_device[i].conn_state = BTA_DM_UNPAIRING;
         btm_remove_acl(other_address,
                        bta_dm_cb.device_list.peer_device[i].transport);
@@ -750,8 +747,7 @@ void bta_dm_remove_device(tBTA_DM_MSG* p_data) {
   if (continue_delete_dev) bta_dm_process_remove_device(p_dev->bd_addr);
 
   /* Delete the other paired device too */
-  BD_ADDR dummy_bda = {0};
-  if (continue_delete_other_dev && (bdcmp(other_address, dummy_bda) != 0))
+  if (continue_delete_other_dev && !other_address.IsEmpty())
     bta_dm_process_remove_device(other_address);
 }
 
@@ -798,10 +794,7 @@ void bta_dm_add_device(tBTA_DM_MSG* p_data) {
   if (!BTM_SecAddDevice(p_dev->bd_addr, p_dc, p_dev->bd_name, p_dev->features,
                         trusted_services_mask, p_lc, p_dev->key_type,
                         p_dev->io_cap, p_dev->pin_length)) {
-    APPL_TRACE_ERROR("BTA_DM: Error adding device %08x%04x",
-                     (p_dev->bd_addr[0] << 24) + (p_dev->bd_addr[1] << 16) +
-                         (p_dev->bd_addr[2] << 8) + p_dev->bd_addr[3],
-                     (p_dev->bd_addr[4] << 8) + p_dev->bd_addr[5]);
+    LOG(ERROR) << "BTA_DM: Error adding device " << p_dev->bd_addr;
   }
 }
 
@@ -822,8 +815,8 @@ void bta_dm_close_acl(tBTA_DM_MSG* p_data) {
 
   if (BTM_IsAclConnectionUp(p_remove_acl->bd_addr, p_remove_acl->transport)) {
     for (index = 0; index < bta_dm_cb.device_list.count; index++) {
-      if (!bdcmp(bta_dm_cb.device_list.peer_device[index].peer_bdaddr,
-                 p_remove_acl->bd_addr))
+      if (bta_dm_cb.device_list.peer_device[index].peer_bdaddr ==
+          p_remove_acl->bd_addr)
         break;
     }
     if (index != bta_dm_cb.device_list.count) {
@@ -863,8 +856,6 @@ void bta_dm_remove_all_acl(tBTA_DM_MSG* p_data) {
   APPL_TRACE_DEBUG("%s link type = %d", __func__, link_type);
 
   for (uint8_t i = 0; i < bta_dm_cb.device_list.count; i++) {
-    BD_ADDR addr = {0};
-    bdcpy(addr, bta_dm_cb.device_list.peer_device[i].peer_bdaddr);
     transport = bta_dm_cb.device_list.peer_device[i].transport;
     if ((link_type == BTA_DM_LINK_TYPE_ALL) ||
         ((link_type == BTA_DM_LINK_TYPE_LE) &&
@@ -872,7 +863,8 @@ void bta_dm_remove_all_acl(tBTA_DM_MSG* p_data) {
         ((link_type == BTA_DM_LINK_TYPE_BR_EDR) &&
          (transport == BT_TRANSPORT_BR_EDR))) {
       /* Disconnect the ACL link */
-      btm_remove_acl(addr, transport);
+      btm_remove_acl(bta_dm_cb.device_list.peer_device[i].peer_bdaddr,
+                     transport);
     }
   }
 }
@@ -900,7 +892,7 @@ void bta_dm_bond(tBTA_DM_MSG* p_data) {
 
   if (bta_dm_cb.p_sec_cback && (status != BTM_CMD_STARTED)) {
     memset(&sec_event, 0, sizeof(tBTA_DM_SEC));
-    bdcpy(sec_event.auth_cmpl.bd_addr, p_data->bond.bd_addr);
+    sec_event.auth_cmpl.bd_addr = p_data->bond.bd_addr;
     p_name = BTM_SecReadDevName(p_data->bond.bd_addr);
     if (p_name != NULL) {
       memcpy(sec_event.auth_cmpl.bd_name, p_name, (BD_NAME_LEN - 1));
@@ -989,12 +981,12 @@ void bta_dm_pin_reply(tBTA_DM_MSG* p_data) {
  *
  ******************************************************************************/
 static void bta_dm_policy_cback(tBTA_SYS_CONN_STATUS status, uint8_t id,
-                                uint8_t app_id, BD_ADDR peer_addr) {
+                                uint8_t app_id, const RawAddress* peer_addr) {
   tBTA_DM_PEER_DEVICE* p_dev = NULL;
   uint16_t policy = app_id;
   uint32_t mask = (uint32_t)(1 << id);
 
-  if (peer_addr) p_dev = bta_dm_find_peer_device(peer_addr);
+  if (peer_addr) p_dev = bta_dm_find_peer_device(*peer_addr);
 
   APPL_TRACE_DEBUG(" bta_dm_policy_cback cmd:%d, policy:0x%x", status, policy);
   switch (status) {
@@ -1049,7 +1041,7 @@ static void bta_dm_policy_cback(tBTA_SYS_CONN_STATUS status, uint8_t id,
 void bta_dm_confirm(tBTA_DM_MSG* p_data) {
   tBTM_STATUS res = BTM_NOT_AUTHORIZED;
 
-  if (p_data->confirm.accept == true) res = BTM_SUCCESS;
+  if (p_data->confirm.accept) res = BTM_SUCCESS;
   BTM_ConfirmReqReply(res, p_data->confirm.bd_addr);
 }
 
@@ -1094,7 +1086,7 @@ void bta_dm_ci_io_req_act(tBTA_DM_MSG* p_data) {
 void bta_dm_ci_rmt_oob_act(tBTA_DM_MSG* p_data) {
   tBTM_STATUS res = BTM_NOT_AUTHORIZED;
 
-  if (p_data->ci_rmt_oob.accept == true) res = BTM_SUCCESS;
+  if (p_data->ci_rmt_oob.accept) res = BTM_SUCCESS;
   BTM_RemoteOobDataReply(res, p_data->ci_rmt_oob.bd_addr, p_data->ci_rmt_oob.c,
                          p_data->ci_rmt_oob.r);
 }
@@ -1112,7 +1104,7 @@ void bta_dm_ci_rmt_oob_act(tBTA_DM_MSG* p_data) {
 void bta_dm_search_start(tBTA_DM_MSG* p_data) {
   tBTM_INQUIRY_CMPL result;
 
-  size_t len = sizeof(tBT_UUID) * p_data->search.num_uuid;
+  size_t len = sizeof(Uuid) * p_data->search.num_uuid;
   bta_dm_gattc_register();
 
   APPL_TRACE_DEBUG("%s avoid_scatter=%d", __func__,
@@ -1134,8 +1126,8 @@ void bta_dm_search_start(tBTA_DM_MSG* p_data) {
 
   if ((bta_dm_search_cb.num_uuid = p_data->search.num_uuid) != 0 &&
       p_data->search.p_uuid != NULL) {
-    bta_dm_search_cb.p_srvc_uuid = (tBT_UUID*)osi_malloc(len);
-    memcpy(bta_dm_search_cb.p_srvc_uuid, p_data->search.p_uuid, len);
+    bta_dm_search_cb.p_srvc_uuid = (Uuid*)osi_malloc(len);
+    *bta_dm_search_cb.p_srvc_uuid = *p_data->search.p_uuid;
   }
   result.status = BTM_StartInquiry((tBTM_INQ_PARMS*)&p_data->search.inq_params,
                                    bta_dm_inq_results_cb,
@@ -1205,7 +1197,7 @@ void bta_dm_search_cancel(UNUSED_ATTR tBTA_DM_MSG* p_data) {
  *
  ******************************************************************************/
 void bta_dm_discover(tBTA_DM_MSG* p_data) {
-  size_t len = sizeof(tBT_UUID) * p_data->discover.num_uuid;
+  size_t len = sizeof(Uuid) * p_data->discover.num_uuid;
   APPL_TRACE_EVENT("%s services_to_search=0x%04X, sdp_search=%d", __func__,
                    p_data->discover.services, p_data->discover.sdp_search);
 
@@ -1216,8 +1208,8 @@ void bta_dm_discover(tBTA_DM_MSG* p_data) {
   osi_free_and_reset((void**)&bta_dm_search_cb.p_srvc_uuid);
   if ((bta_dm_search_cb.num_uuid = p_data->discover.num_uuid) != 0 &&
       p_data->discover.p_uuid != NULL) {
-    bta_dm_search_cb.p_srvc_uuid = (tBT_UUID*)osi_malloc(len);
-    memcpy(bta_dm_search_cb.p_srvc_uuid, p_data->discover.p_uuid, len);
+    bta_dm_search_cb.p_srvc_uuid = (Uuid*)osi_malloc(len);
+    *bta_dm_search_cb.p_srvc_uuid = *p_data->discover.p_uuid;
   }
   bta_dm_search_cb.uuid_to_search = bta_dm_search_cb.num_uuid;
 
@@ -1232,7 +1224,7 @@ void bta_dm_discover(tBTA_DM_MSG* p_data) {
   bta_dm_search_cb.transport = p_data->discover.transport;
 
   bta_dm_search_cb.name_discover_done = false;
-  memcpy(&bta_dm_search_cb.uuid, &p_data->discover.uuid, sizeof(tSDP_UUID));
+  bta_dm_search_cb.uuid = p_data->discover.uuid;
   bta_dm_discover_device(p_data->discover.bd_addr);
 }
 
@@ -1249,7 +1241,7 @@ void bta_dm_di_disc_cmpl(tBTA_DM_MSG* p_data) {
   tBTA_DM_DI_DISC_CMPL di_disc;
 
   memset(&di_disc, 0, sizeof(tBTA_DM_DI_DISC_CMPL));
-  bdcpy(di_disc.bd_addr, bta_dm_search_cb.peer_bdaddr);
+  di_disc.bd_addr = bta_dm_search_cb.peer_bdaddr;
 
   if ((p_data->hdr.offset == SDP_SUCCESS) ||
       (p_data->hdr.offset == SDP_DB_FULL)) {
@@ -1300,7 +1292,7 @@ static void bta_dm_disable_search_and_disc(void) {
 
   if (bta_dm_di_cb.p_di_db != NULL) {
     memset(&di_disc, 0, sizeof(tBTA_DM_DI_DISC_CMPL));
-    bdcpy(di_disc.bd_addr, bta_dm_search_cb.peer_bdaddr);
+    di_disc.bd_addr = bta_dm_search_cb.peer_bdaddr;
     di_disc.result = BTA_FAILURE;
 
     bta_dm_di_cb.p_di_db = NULL;
@@ -1322,7 +1314,7 @@ void bta_dm_di_disc(tBTA_DM_MSG* p_data) {
   uint16_t result = BTA_FAILURE;
 
   bta_dm_search_cb.p_search_cback = p_data->di_disc.p_cback;
-  bdcpy(bta_dm_search_cb.peer_bdaddr, p_data->di_disc.bd_addr);
+  bta_dm_search_cb.peer_bdaddr = p_data->di_disc.bd_addr;
   bta_dm_di_cb.p_di_db = p_data->di_disc.p_sdp_db;
 
   bta_dm_search_cb.p_sdp_db =
@@ -1352,13 +1344,13 @@ void bta_dm_di_disc(tBTA_DM_MSG* p_data) {
  * Returns          true if started to get remote name
  *
  ******************************************************************************/
-static bool bta_dm_read_remote_device_name(BD_ADDR bd_addr,
+static bool bta_dm_read_remote_device_name(const RawAddress& bd_addr,
                                            tBT_TRANSPORT transport) {
   tBTM_STATUS btm_status;
 
-  APPL_TRACE_DEBUG("bta_dm_read_remote_device_name");
+  APPL_TRACE_DEBUG("%s", __func__);
 
-  bdcpy(bta_dm_search_cb.peer_bdaddr, bd_addr);
+  bta_dm_search_cb.peer_bdaddr = bd_addr;
   bta_dm_search_cb.peer_name[0] = 0;
 
   btm_status =
@@ -1366,13 +1358,11 @@ static bool bta_dm_read_remote_device_name(BD_ADDR bd_addr,
                                (tBTM_CMPL_CB*)bta_dm_remname_cback, transport);
 
   if (btm_status == BTM_CMD_STARTED) {
-    APPL_TRACE_DEBUG(
-        "bta_dm_read_remote_device_name: BTM_ReadRemoteDeviceName is started");
+    APPL_TRACE_DEBUG("%s: BTM_ReadRemoteDeviceName is started", __func__);
 
     return (true);
   } else if (btm_status == BTM_BUSY) {
-    APPL_TRACE_DEBUG(
-        "bta_dm_read_remote_device_name: BTM_ReadRemoteDeviceName is busy");
+    APPL_TRACE_DEBUG("%s: BTM_ReadRemoteDeviceName is busy", __func__);
 
     /* Remote name discovery is on going now so BTM cannot notify through
      * "bta_dm_remname_cback" */
@@ -1381,10 +1371,8 @@ static bool bta_dm_read_remote_device_name(BD_ADDR bd_addr,
 
     return (true);
   } else {
-    APPL_TRACE_WARNING(
-        "bta_dm_read_remote_device_name: BTM_ReadRemoteDeviceName returns "
-        "0x%02X",
-        btm_status);
+    APPL_TRACE_WARNING("%s: BTM_ReadRemoteDeviceName returns 0x%02X", __func__,
+                       btm_status);
 
     return (false);
   }
@@ -1488,12 +1476,10 @@ void bta_dm_sdp_result(tBTA_DM_MSG* p_data) {
   uint16_t service = 0xFFFF;
   tSDP_PROTOCOL_ELEM pe;
 
-  tBT_UUID* p_uuid = bta_dm_search_cb.p_srvc_uuid;
+  Uuid* p_uuid = bta_dm_search_cb.p_srvc_uuid;
   tBTA_DM_SEARCH result;
-  tBT_UUID service_uuid;
 
-  uint32_t num_uuids = 0;
-  uint8_t uuid_list[32][MAX_UUID_SIZE];  // assuming a max of 32 services
+  std::vector<Uuid> uuid_list;
 
   if ((p_data->sdp_event.sdp_result == SDP_SUCCESS) ||
       (p_data->sdp_event.sdp_result == SDP_NO_RECS_MATCH) ||
@@ -1503,7 +1489,7 @@ void bta_dm_sdp_result(tBTA_DM_MSG* p_data) {
       p_sdp_rec = NULL;
       if (bta_dm_search_cb.service_index == (BTA_USER_SERVICE_ID + 1)) {
         p_sdp_rec = SDP_FindServiceUUIDInDb(bta_dm_search_cb.p_sdp_db,
-                                            &bta_dm_search_cb.uuid, p_sdp_rec);
+                                            bta_dm_search_cb.uuid, p_sdp_rec);
 
         if (p_sdp_rec && SDP_FindProtocolListElemInRec(
                              p_sdp_rec, UUID_PROTOCOL_RFCOMM, &pe)) {
@@ -1523,7 +1509,7 @@ void bta_dm_sdp_result(tBTA_DM_MSG* p_data) {
           p_uuid +=
               (bta_dm_search_cb.num_uuid - bta_dm_search_cb.uuid_to_search);
           /* only support 16 bits UUID for now */
-          service = p_uuid->uu.uuid16;
+          service = p_uuid->As16Bit();
         }
         /* all GATT based services */
         do {
@@ -1531,14 +1517,14 @@ void bta_dm_sdp_result(tBTA_DM_MSG* p_data) {
           p_sdp_rec =
               SDP_FindServiceInDb(bta_dm_search_cb.p_sdp_db, 0, p_sdp_rec);
           if (p_sdp_rec) {
+            Uuid service_uuid;
             if (SDP_FindServiceUUIDInRec(p_sdp_rec, &service_uuid)) {
               /* send result back to app now, one by one */
-              bdcpy(result.disc_ble_res.bd_addr, bta_dm_search_cb.peer_bdaddr);
+              result.disc_ble_res.bd_addr = bta_dm_search_cb.peer_bdaddr;
               strlcpy((char*)result.disc_ble_res.bd_name, bta_dm_get_remname(),
                       BD_NAME_LEN);
-              result.disc_ble_res.service.len = service_uuid.len;
-              result.disc_ble_res.service.uu.uuid16 = service_uuid.uu.uuid16;
 
+              result.disc_ble_res.service = service_uuid;
               bta_dm_search_cb.p_search_cback(BTA_DM_DISC_BLE_RES_EVT, &result);
             }
           }
@@ -1553,16 +1539,14 @@ void bta_dm_sdp_result(tBTA_DM_MSG* p_data) {
              bta_dm_search_cb.services != BTA_ALL_SERVICE_MASK) ||
             (p_sdp_rec != NULL)) {
           if (service != UUID_SERVCLASS_PNP_INFORMATION) {
-            uint16_t tmp_svc = 0xFFFF;
             bta_dm_search_cb.services_found |=
                 (tBTA_SERVICE_MASK)(BTA_SERVICE_ID_TO_SERVICE_MASK(
                     bta_dm_search_cb.service_index - 1));
-            tmp_svc =
+            uint16_t tmp_svc =
                 bta_service_id_to_uuid_lkup_tbl[bta_dm_search_cb.service_index -
                                                 1];
             /* Add to the list of UUIDs */
-            sdpu_uuid16_to_uuid128(tmp_svc, uuid_list[num_uuids]);
-            num_uuids++;
+            uuid_list.push_back(Uuid::From16Bit(tmp_svc));
           }
         }
       }
@@ -1588,14 +1572,14 @@ void bta_dm_sdp_result(tBTA_DM_MSG* p_data) {
     if (bta_dm_search_cb.services == BTA_ALL_SERVICE_MASK) {
       p_sdp_rec = NULL;
       do {
-        tBT_UUID temp_uuid;
         /* find a service record, report it */
         p_sdp_rec =
             SDP_FindServiceInDb_128bit(bta_dm_search_cb.p_sdp_db, p_sdp_rec);
         if (p_sdp_rec) {
+          // SDP_FindServiceUUIDInRec_128bit is used only once, refactor?
+          Uuid temp_uuid;
           if (SDP_FindServiceUUIDInRec_128bit(p_sdp_rec, &temp_uuid)) {
-            memcpy(uuid_list[num_uuids], temp_uuid.uu.uuid128, MAX_UUID_SIZE);
-            num_uuids++;
+            uuid_list.push_back(temp_uuid);
           }
         }
       } while (p_sdp_rec);
@@ -1616,13 +1600,15 @@ void bta_dm_sdp_result(tBTA_DM_MSG* p_data) {
       p_msg->disc_result.result.disc_res.result = BTA_SUCCESS;
       p_msg->disc_result.result.disc_res.p_raw_data = NULL;
       p_msg->disc_result.result.disc_res.raw_data_size = 0;
-      p_msg->disc_result.result.disc_res.num_uuids = num_uuids;
+      p_msg->disc_result.result.disc_res.num_uuids = uuid_list.size();
       p_msg->disc_result.result.disc_res.p_uuid_list = NULL;
-      if (num_uuids > 0) {
+      if (uuid_list.size() > 0) {
+        // TODO(jpawlowski): make p_uuid_list into vector, and just copy
+        // vectors, but first get rid of bta_sys_sendmsg below.
         p_msg->disc_result.result.disc_res.p_uuid_list =
-            (uint8_t*)osi_malloc(num_uuids * MAX_UUID_SIZE);
-        memcpy(p_msg->disc_result.result.disc_res.p_uuid_list, uuid_list,
-               num_uuids * MAX_UUID_SIZE);
+            (Uuid*)osi_malloc(uuid_list.size() * sizeof(Uuid));
+        memcpy(p_msg->disc_result.result.disc_res.p_uuid_list, uuid_list.data(),
+               uuid_list.size() * sizeof(Uuid));
       }
       // Copy the raw_data to the discovery result structure
       if (bta_dm_search_cb.p_sdp_db != NULL &&
@@ -1663,8 +1649,7 @@ void bta_dm_sdp_result(tBTA_DM_MSG* p_data) {
         APPL_TRACE_EVENT(" Piggy back the SCN over result field  SCN=%d",
                          bta_dm_search_cb.peer_scn);
       }
-      bdcpy(p_msg->disc_result.result.disc_res.bd_addr,
-            bta_dm_search_cb.peer_bdaddr);
+      p_msg->disc_result.result.disc_res.bd_addr = bta_dm_search_cb.peer_bdaddr;
       strlcpy((char*)p_msg->disc_result.result.disc_res.bd_name,
               bta_dm_get_remname(), BD_NAME_LEN);
 
@@ -1688,8 +1673,7 @@ void bta_dm_sdp_result(tBTA_DM_MSG* p_data) {
     p_msg->disc_result.result.disc_res.result = BTA_FAILURE;
     p_msg->disc_result.result.disc_res.services =
         bta_dm_search_cb.services_found;
-    bdcpy(p_msg->disc_result.result.disc_res.bd_addr,
-          bta_dm_search_cb.peer_bdaddr);
+    p_msg->disc_result.result.disc_res.bd_addr = bta_dm_search_cb.peer_bdaddr;
     strlcpy((char*)p_msg->disc_result.result.disc_res.bd_name,
             bta_dm_get_remname(), BD_NAME_LEN);
 
@@ -1775,9 +1759,9 @@ void bta_dm_search_result(tBTA_DM_MSG* p_data) {
   } else {
     /* wait until link is disconnected or timeout */
     bta_dm_search_cb.sdp_results = true;
-    alarm_set_on_queue(bta_dm_search_cb.search_timer,
+    alarm_set_on_mloop(bta_dm_search_cb.search_timer,
                        1000 * (L2CAP_LINK_INACTIVITY_TOUT + 1),
-                       bta_dm_search_timer_cback, NULL, btu_bta_alarm_queue);
+                       bta_dm_search_timer_cback, NULL);
   }
 }
 
@@ -1918,12 +1902,10 @@ void bta_dm_search_cancel_notify(UNUSED_ATTR tBTA_DM_MSG* p_data) {
  * Returns          void
  *
  ******************************************************************************/
-static void bta_dm_find_services(BD_ADDR bd_addr) {
-  tSDP_UUID uuid;
-
-  memset(&uuid, 0, sizeof(tSDP_UUID));
+static void bta_dm_find_services(const RawAddress& bd_addr) {
 
   while (bta_dm_search_cb.service_index < BTA_MAX_SERVICE_ID) {
+    Uuid uuid = Uuid::kEmpty;
     if (bta_dm_search_cb.services_to_search &
         (tBTA_SERVICE_MASK)(
             BTA_SERVICE_ID_TO_SERVICE_MASK(bta_dm_search_cb.service_index))) {
@@ -1936,10 +1918,10 @@ static void bta_dm_find_services(BD_ADDR bd_addr) {
         LOG_INFO(LOG_TAG, "%s services_to_search=%08x", __func__,
                  bta_dm_search_cb.services_to_search);
         if (bta_dm_search_cb.services_to_search & BTA_RES_SERVICE_MASK) {
-          uuid.uu.uuid16 = bta_service_id_to_uuid_lkup_tbl[0];
+          uuid = Uuid::From16Bit(bta_service_id_to_uuid_lkup_tbl[0]);
           bta_dm_search_cb.services_to_search &= ~BTA_RES_SERVICE_MASK;
         } else {
-          uuid.uu.uuid16 = UUID_PROTOCOL_L2CAP;
+          uuid = Uuid::From16Bit(UUID_PROTOCOL_L2CAP);
           bta_dm_search_cb.services_to_search = 0;
         }
       } else {
@@ -1947,15 +1929,14 @@ static void bta_dm_find_services(BD_ADDR bd_addr) {
         if (bta_dm_search_cb.service_index == BTA_BLE_SERVICE_ID) {
           if (bta_dm_search_cb.uuid_to_search > 0 &&
               bta_dm_search_cb.p_srvc_uuid) {
-            memcpy(&uuid, (const void*)(bta_dm_search_cb.p_srvc_uuid +
-                                        bta_dm_search_cb.num_uuid -
-                                        bta_dm_search_cb.uuid_to_search),
-                   sizeof(tBT_UUID));
+            uuid = *(bta_dm_search_cb.p_srvc_uuid + bta_dm_search_cb.num_uuid -
+                     bta_dm_search_cb.uuid_to_search);
 
             bta_dm_search_cb.uuid_to_search--;
           } else {
-            uuid.uu.uuid16 =
-                bta_service_id_to_uuid_lkup_tbl[bta_dm_search_cb.service_index];
+            uuid = Uuid::From16Bit(
+                bta_service_id_to_uuid_lkup_tbl[bta_dm_search_cb
+                                                    .service_index]);
           }
 
           /* last one? clear the BLE service bit if all discovery has been done
@@ -1969,18 +1950,17 @@ static void bta_dm_find_services(BD_ADDR bd_addr) {
           /* remove the service from services to be searched  */
           bta_dm_search_cb.services_to_search &= (tBTA_SERVICE_MASK)(~(
               BTA_SERVICE_ID_TO_SERVICE_MASK(bta_dm_search_cb.service_index)));
-          uuid.uu.uuid16 =
-              bta_service_id_to_uuid_lkup_tbl[bta_dm_search_cb.service_index];
+          uuid = Uuid::From16Bit(
+              bta_service_id_to_uuid_lkup_tbl[bta_dm_search_cb.service_index]);
         }
       }
 
-      if (uuid.len == 0) uuid.len = LEN_UUID_16;
-
       if (bta_dm_search_cb.service_index == BTA_USER_SERVICE_ID) {
-        memcpy(&uuid, &bta_dm_search_cb.uuid, sizeof(tSDP_UUID));
+        uuid = bta_dm_search_cb.uuid;
       }
 
-      LOG_INFO(LOG_TAG, "%s search UUID = %04x", __func__, uuid.uu.uuid16);
+      LOG_INFO(LOG_TAG, "%s search UUID = %s", __func__,
+               uuid.ToString().c_str());
       SDP_InitDiscoveryDb(bta_dm_search_cb.p_sdp_db, BTA_DM_SDP_DB_SIZE, 1,
                           &uuid, 0, NULL);
 
@@ -2013,11 +1993,12 @@ static void bta_dm_find_services(BD_ADDR bd_addr) {
   /* no more services to be discovered */
   if (bta_dm_search_cb.service_index >= BTA_MAX_SERVICE_ID) {
     tBTA_DM_MSG* p_msg = (tBTA_DM_MSG*)osi_malloc(sizeof(tBTA_DM_MSG));
+    /* initialize the data structure - includes p_raw_data and raw_data_size */
+    memset(&(p_msg->disc_result.result), 0, sizeof(tBTA_DM_DISC_RES));
     p_msg->hdr.event = BTA_DM_DISCOVERY_RESULT_EVT;
     p_msg->disc_result.result.disc_res.services =
         bta_dm_search_cb.services_found;
-    bdcpy(p_msg->disc_result.result.disc_res.bd_addr,
-          bta_dm_search_cb.peer_bdaddr);
+    p_msg->disc_result.result.disc_res.bd_addr = bta_dm_search_cb.peer_bdaddr;
     strlcpy((char*)p_msg->disc_result.result.disc_res.bd_name,
             bta_dm_get_remname(), BD_NAME_LEN);
 
@@ -2067,7 +2048,7 @@ static void bta_dm_discover_next_device(void) {
  * Returns          void
  *
  ******************************************************************************/
-static void bta_dm_discover_device(BD_ADDR remote_bd_addr) {
+static void bta_dm_discover_device(const RawAddress& remote_bd_addr) {
   tBT_TRANSPORT transport = BT_TRANSPORT_BR_EDR;
   if (bta_dm_search_cb.transport == BTA_TRANSPORT_UNKNOWN) {
     tBT_DEVICE_TYPE dev_type;
@@ -2083,11 +2064,9 @@ static void bta_dm_discover_device(BD_ADDR remote_bd_addr) {
   /* Reset transport state for next discovery */
   bta_dm_search_cb.transport = BTA_TRANSPORT_UNKNOWN;
 
-  APPL_TRACE_DEBUG("%s BDA:0x%02X%02X%02X%02X%02X%02X", __func__,
-                   remote_bd_addr[0], remote_bd_addr[1], remote_bd_addr[2],
-                   remote_bd_addr[3], remote_bd_addr[4], remote_bd_addr[5]);
+  VLOG(1) << __func__ << " BDA: " << remote_bd_addr;
 
-  bdcpy(bta_dm_search_cb.peer_bdaddr, remote_bd_addr);
+  bta_dm_search_cb.peer_bdaddr = remote_bd_addr;
 
   APPL_TRACE_DEBUG(
       "%s name_discover_done = %d p_btm_inq_info 0x%x state = %d, transport=%d",
@@ -2110,8 +2089,7 @@ static void bta_dm_discover_device(BD_ADDR remote_bd_addr) {
       ((bta_dm_search_cb.p_btm_inq_info == NULL) ||
        (bta_dm_search_cb.p_btm_inq_info &&
         (!bta_dm_search_cb.p_btm_inq_info->appl_knows_rem_name)))) {
-    if (bta_dm_read_remote_device_name(bta_dm_search_cb.peer_bdaddr,
-                                       transport) == true)
+    if (bta_dm_read_remote_device_name(bta_dm_search_cb.peer_bdaddr, transport))
       return;
 
     /* starting name discovery failed */
@@ -2127,7 +2105,7 @@ static void bta_dm_discover_device(BD_ADDR remote_bd_addr) {
     bta_dm_search_cb.uuid_to_search = bta_dm_search_cb.num_uuid;
     if ((bta_dm_search_cb.p_btm_inq_info != NULL) &&
         bta_dm_search_cb.services != BTA_USER_SERVICE_MASK &&
-        (bta_dm_search_cb.sdp_search == false)) {
+        (!bta_dm_search_cb.sdp_search)) {
       /* check if EIR provides the information of supported services */
       bta_dm_eir_search_services(&bta_dm_search_cb.p_btm_inq_info->results,
                                  &bta_dm_search_cb.services_to_search,
@@ -2182,8 +2160,7 @@ static void bta_dm_discover_device(BD_ADDR remote_bd_addr) {
   memset(&(p_msg->disc_result.result), 0, sizeof(tBTA_DM_DISC_RES));
   p_msg->disc_result.result.disc_res.result = BTA_SUCCESS;
   p_msg->disc_result.result.disc_res.services = bta_dm_search_cb.services_found;
-  bdcpy(p_msg->disc_result.result.disc_res.bd_addr,
-        bta_dm_search_cb.peer_bdaddr);
+  p_msg->disc_result.result.disc_res.bd_addr = bta_dm_search_cb.peer_bdaddr;
   strlcpy((char*)p_msg->disc_result.result.disc_res.bd_name,
           (char*)bta_dm_search_cb.peer_name, BD_NAME_LEN);
 
@@ -2218,12 +2195,13 @@ static void bta_dm_sdp_callback(uint16_t sdp_status) {
  * Returns          void
  *
  ******************************************************************************/
-static void bta_dm_inq_results_cb(tBTM_INQ_RESULTS* p_inq, uint8_t* p_eir) {
+static void bta_dm_inq_results_cb(tBTM_INQ_RESULTS* p_inq, uint8_t* p_eir,
+                                  uint16_t eir_len) {
   tBTA_DM_SEARCH result;
   tBTM_INQ_INFO* p_inq_info;
   uint16_t service_class;
 
-  bdcpy(result.inq_res.bd_addr, p_inq->remote_bd_addr);
+  result.inq_res.bd_addr = p_inq->remote_bd_addr;
   memcpy(result.inq_res.dev_class, p_inq->dev_class, DEV_CLASS_LEN);
   BTM_COD_SERVICE_CLASS(service_class, p_inq->dev_class);
   result.inq_res.is_limited =
@@ -2237,6 +2215,7 @@ static void bta_dm_inq_results_cb(tBTM_INQ_RESULTS* p_inq, uint8_t* p_eir) {
 
   /* application will parse EIR to find out remote device name */
   result.inq_res.p_eir = p_eir;
+  result.inq_res.eir_len = eir_len;
 
   p_inq_info = BTM_InqDbRead(p_inq->remote_bd_addr);
   if (p_inq_info != NULL) {
@@ -2270,7 +2249,7 @@ static void bta_dm_inq_cmpl_cb(void* p_result) {
 
   APPL_TRACE_DEBUG("%s", __func__);
 
-  if (bta_dm_search_cb.cancel_pending == false) {
+  if (!bta_dm_search_cb.cancel_pending) {
     p_msg->inq_cmpl.hdr.event = BTA_DM_INQUIRY_CMPL_EVT;
     p_msg->inq_cmpl.num = ((tBTM_INQUIRY_CMPL*)p_result)->num_resp;
   } else {
@@ -2292,16 +2271,16 @@ static void bta_dm_inq_cmpl_cb(void* p_result) {
  * Returns          void
  *
  ******************************************************************************/
-static void bta_dm_service_search_remname_cback(BD_ADDR bd_addr,
+static void bta_dm_service_search_remname_cback(const RawAddress& bd_addr,
                                                 UNUSED_ATTR DEV_CLASS dc,
                                                 BD_NAME bd_name) {
   tBTM_REMOTE_DEV_NAME rem_name;
   tBTM_STATUS btm_status;
 
-  APPL_TRACE_DEBUG("bta_dm_service_search_remname_cback name=<%s>", bd_name);
+  APPL_TRACE_DEBUG("%s name=<%s>", __func__, bd_name);
 
   /* if this is what we are looking for */
-  if (!bdcmp(bta_dm_search_cb.peer_bdaddr, bd_addr)) {
+  if (bta_dm_search_cb.peer_bdaddr == bd_addr) {
     rem_name.length = strlen((char*)bd_name);
     if (rem_name.length > (BD_NAME_LEN - 1)) {
       rem_name.length = (BD_NAME_LEN - 1);
@@ -2318,15 +2297,11 @@ static void bta_dm_service_search_remname_cback(BD_ADDR bd_addr,
                                           BT_TRANSPORT_BR_EDR);
     if (btm_status == BTM_BUSY) {
       /* wait for next chance(notification of remote name discovery done) */
-      APPL_TRACE_DEBUG(
-          "bta_dm_service_search_remname_cback: BTM_ReadRemoteDeviceName is "
-          "busy");
+      APPL_TRACE_DEBUG("%s: BTM_ReadRemoteDeviceName is busy", __func__);
     } else if (btm_status != BTM_CMD_STARTED) {
       /* if failed to start getting remote name then continue */
-      APPL_TRACE_WARNING(
-          "bta_dm_service_search_remname_cback: BTM_ReadRemoteDeviceName "
-          "returns 0x%02X",
-          btm_status);
+      APPL_TRACE_WARNING("%s: BTM_ReadRemoteDeviceName returns 0x%02X",
+                         __func__, btm_status);
 
       rem_name.length = 0;
       rem_name.remote_bd_name[0] = 0;
@@ -2362,7 +2337,7 @@ static void bta_dm_remname_cback(tBTM_REMOTE_DEV_NAME* p_remote_name) {
 
   tBTA_DM_REM_NAME* p_msg =
       (tBTA_DM_REM_NAME*)osi_malloc(sizeof(tBTA_DM_REM_NAME));
-  bdcpy(p_msg->result.disc_res.bd_addr, bta_dm_search_cb.peer_bdaddr);
+  p_msg->result.disc_res.bd_addr = bta_dm_search_cb.peer_bdaddr;
   strlcpy((char*)p_msg->result.disc_res.bd_name,
           (char*)p_remote_name->remote_bd_name, BD_NAME_LEN);
   p_msg->hdr.event = BTA_DM_REMT_NAME_EVT;
@@ -2379,15 +2354,15 @@ static void bta_dm_remname_cback(tBTM_REMOTE_DEV_NAME* p_remote_name) {
  * Returns          void
  *
  ******************************************************************************/
-static uint8_t bta_dm_authorize_cback(BD_ADDR bd_addr, DEV_CLASS dev_class,
-                                      BD_NAME bd_name,
+static uint8_t bta_dm_authorize_cback(const RawAddress& bd_addr,
+                                      DEV_CLASS dev_class, BD_NAME bd_name,
                                       UNUSED_ATTR uint8_t* service_name,
                                       uint8_t service_id,
                                       UNUSED_ATTR bool is_originator) {
   tBTA_DM_SEC sec_event;
   uint8_t index = 1;
 
-  bdcpy(sec_event.authorize.bd_addr, bd_addr);
+  sec_event.authorize.bd_addr = bd_addr;
   memcpy(sec_event.authorize.dev_class, dev_class, DEV_CLASS_LEN);
   strlcpy((char*)sec_event.authorize.bd_name, (char*)bd_name, BD_NAME_LEN);
 
@@ -2436,7 +2411,7 @@ static void bta_dm_pinname_cback(void* p_data) {
 
   if (BTA_DM_SP_CFM_REQ_EVT == event) {
     /* Retrieved saved device class and bd_addr */
-    bdcpy(sec_event.cfm_req.bd_addr, bta_dm_cb.pin_bd_addr);
+    sec_event.cfm_req.bd_addr = bta_dm_cb.pin_bd_addr;
     BTA_COPY_DEVICE_CLASS(sec_event.cfm_req.dev_class, bta_dm_cb.pin_dev_class);
 
     if (p_result && p_result->status == BTM_SUCCESS) {
@@ -2456,7 +2431,7 @@ static void bta_dm_pinname_cback(void* p_data) {
     sec_event.cfm_req.just_works = bta_dm_cb.just_works;
   } else {
     /* Retrieved saved device class and bd_addr */
-    bdcpy(sec_event.pin_req.bd_addr, bta_dm_cb.pin_bd_addr);
+    sec_event.pin_req.bd_addr = bta_dm_cb.pin_bd_addr;
     BTA_COPY_DEVICE_CLASS(sec_event.pin_req.dev_class, bta_dm_cb.pin_dev_class);
 
     if (p_result && p_result->status == BTM_SUCCESS) {
@@ -2486,7 +2461,7 @@ static void bta_dm_pinname_cback(void* p_data) {
  * Returns          void
  *
  ******************************************************************************/
-static uint8_t bta_dm_pin_cback(BD_ADDR bd_addr, DEV_CLASS dev_class,
+static uint8_t bta_dm_pin_cback(const RawAddress& bd_addr, DEV_CLASS dev_class,
                                 BD_NAME bd_name, bool min_16_digit) {
   tBTA_DM_SEC sec_event;
 
@@ -2496,7 +2471,7 @@ static uint8_t bta_dm_pin_cback(BD_ADDR bd_addr, DEV_CLASS dev_class,
    * name request */
   if (bd_name[0] == 0) {
     bta_dm_cb.pin_evt = BTA_DM_PIN_REQ_EVT;
-    bdcpy(bta_dm_cb.pin_bd_addr, bd_addr);
+    bta_dm_cb.pin_bd_addr = bd_addr;
     BTA_COPY_DEVICE_CLASS(bta_dm_cb.pin_dev_class, dev_class);
     if ((BTM_ReadRemoteDeviceName(bd_addr, bta_dm_pinname_cback,
                                   BT_TRANSPORT_BR_EDR)) == BTM_CMD_STARTED)
@@ -2506,7 +2481,7 @@ static uint8_t bta_dm_pin_cback(BD_ADDR bd_addr, DEV_CLASS dev_class,
         " bta_dm_pin_cback() -> Failed to start Remote Name Request  ");
   }
 
-  bdcpy(sec_event.pin_req.bd_addr, bd_addr);
+  sec_event.pin_req.bd_addr = bd_addr;
   BTA_COPY_DEVICE_CLASS(sec_event.pin_req.dev_class, dev_class);
   strlcpy((char*)sec_event.pin_req.bd_name, (char*)bd_name, BD_NAME_LEN);
   sec_event.pin_req.min_16_digit = min_16_digit;
@@ -2524,7 +2499,7 @@ static uint8_t bta_dm_pin_cback(BD_ADDR bd_addr, DEV_CLASS dev_class,
  * Returns          void
  *
  ******************************************************************************/
-static uint8_t bta_dm_new_link_key_cback(BD_ADDR bd_addr,
+static uint8_t bta_dm_new_link_key_cback(const RawAddress& bd_addr,
                                          UNUSED_ATTR DEV_CLASS dev_class,
                                          BD_NAME bd_name, LINK_KEY key,
                                          uint8_t key_type) {
@@ -2539,7 +2514,7 @@ static uint8_t bta_dm_new_link_key_cback(BD_ADDR bd_addr,
     event = BTA_DM_AUTH_CMPL_EVT;
     p_auth_cmpl = &sec_event.auth_cmpl;
 
-    bdcpy(p_auth_cmpl->bd_addr, bd_addr);
+    p_auth_cmpl->bd_addr = bd_addr;
 
     memcpy(p_auth_cmpl->bd_name, bd_name, (BD_NAME_LEN - 1));
     p_auth_cmpl->bd_name[BD_NAME_LEN - 1] = 0;
@@ -2579,13 +2554,13 @@ static uint8_t bta_dm_new_link_key_cback(BD_ADDR bd_addr,
  *
  ******************************************************************************/
 static uint8_t bta_dm_authentication_complete_cback(
-    BD_ADDR bd_addr, UNUSED_ATTR DEV_CLASS dev_class, BD_NAME bd_name,
+    const RawAddress& bd_addr, UNUSED_ATTR DEV_CLASS dev_class, BD_NAME bd_name,
     int result) {
   tBTA_DM_SEC sec_event;
 
   if (result != BTM_SUCCESS) {
     memset(&sec_event, 0, sizeof(tBTA_DM_SEC));
-    bdcpy(sec_event.auth_cmpl.bd_addr, bd_addr);
+    sec_event.auth_cmpl.bd_addr = bd_addr;
 
     memcpy(sec_event.auth_cmpl.bd_name, bd_name, (BD_NAME_LEN - 1));
     sec_event.auth_cmpl.bd_name[BD_NAME_LEN - 1] = 0;
@@ -2598,7 +2573,13 @@ static uint8_t bta_dm_authentication_complete_cback(
     if (bta_dm_cb.p_sec_cback)
       bta_dm_cb.p_sec_cback(BTA_DM_AUTH_CMPL_EVT, &sec_event);
 
-    bta_dm_remove_sec_dev_entry(bd_addr);
+    if (result == HCI_ERR_AUTH_FAILURE || result == HCI_ERR_KEY_MISSING ||
+        result == HCI_ERR_HOST_REJECT_SECURITY ||
+        result == HCI_ERR_ENCRY_MODE_NOT_ACCEPTABLE) {
+      APPL_TRACE_WARNING("%s deleting %s - result: 0x%02x", __func__,
+                         bd_addr.ToString().c_str(), result);
+      bta_dm_remove_sec_dev_entry(bd_addr);
+    }
   }
 
   return BTM_SUCCESS;
@@ -2649,7 +2630,7 @@ static uint8_t bta_dm_sp_cback(tBTM_SP_EVT event, tBTM_SP_EVT_DATA* p_data) {
       sec_event.cfm_req.loc_io_caps = p_data->cfm_req.loc_io_caps;
       sec_event.cfm_req.rmt_io_caps = p_data->cfm_req.rmt_io_caps;
 
-/* continue to next case */
+    /* continue to next case */
 #if (BTM_LOCAL_IO_CAPS != BTM_IO_CAP_NONE)
     /* Passkey entry mode, mobile device with output capability is very
         unlikely to receive key request, so skip this event */
@@ -2664,7 +2645,7 @@ static uint8_t bta_dm_sp_cback(tBTM_SP_EVT event, tBTM_SP_EVT_DATA* p_data) {
            call remote name request using values from cfm_req */
         if (p_data->cfm_req.bd_name[0] == 0) {
           bta_dm_cb.pin_evt = pin_evt;
-          bdcpy(bta_dm_cb.pin_bd_addr, p_data->cfm_req.bd_addr);
+          bta_dm_cb.pin_bd_addr = p_data->cfm_req.bd_addr;
           BTA_COPY_DEVICE_CLASS(bta_dm_cb.pin_dev_class,
                                 p_data->cfm_req.dev_class);
           if ((BTM_ReadRemoteDeviceName(
@@ -2677,7 +2658,7 @@ static uint8_t bta_dm_sp_cback(tBTM_SP_EVT event, tBTM_SP_EVT_DATA* p_data) {
           /* Due to the switch case falling through below to
              BTM_SP_KEY_NOTIF_EVT,
              copy these values into key_notif from cfm_req */
-          bdcpy(sec_event.key_notif.bd_addr, p_data->cfm_req.bd_addr);
+          sec_event.key_notif.bd_addr = p_data->cfm_req.bd_addr;
           BTA_COPY_DEVICE_CLASS(sec_event.key_notif.dev_class,
                                 p_data->cfm_req.dev_class);
           strlcpy((char*)sec_event.key_notif.bd_name,
@@ -2690,7 +2671,7 @@ static uint8_t bta_dm_sp_cback(tBTM_SP_EVT event, tBTM_SP_EVT_DATA* p_data) {
            and initiate a name request with values from key_notif */
         if (p_data->key_notif.bd_name[0] == 0) {
           bta_dm_cb.pin_evt = pin_evt;
-          bdcpy(bta_dm_cb.pin_bd_addr, p_data->key_notif.bd_addr);
+          bta_dm_cb.pin_bd_addr = p_data->key_notif.bd_addr;
           BTA_COPY_DEVICE_CLASS(bta_dm_cb.pin_dev_class,
                                 p_data->key_notif.dev_class);
           if ((BTM_ReadRemoteDeviceName(
@@ -2700,7 +2681,7 @@ static uint8_t bta_dm_sp_cback(tBTM_SP_EVT event, tBTM_SP_EVT_DATA* p_data) {
           APPL_TRACE_WARNING(
               " bta_dm_sp_cback() -> Failed to start Remote Name Request  ");
         } else {
-          bdcpy(sec_event.key_notif.bd_addr, p_data->key_notif.bd_addr);
+          sec_event.key_notif.bd_addr = p_data->key_notif.bd_addr;
           BTA_COPY_DEVICE_CLASS(sec_event.key_notif.dev_class,
                                 p_data->key_notif.dev_class);
           strlcpy((char*)sec_event.key_notif.bd_name,
@@ -2723,7 +2704,7 @@ static uint8_t bta_dm_sp_cback(tBTM_SP_EVT event, tBTM_SP_EVT_DATA* p_data) {
        * a name request */
       if (p_data->rmt_oob.bd_name[0] == 0) {
         bta_dm_cb.pin_evt = BTA_DM_SP_RMT_OOB_EVT;
-        bdcpy(bta_dm_cb.pin_bd_addr, p_data->rmt_oob.bd_addr);
+        bta_dm_cb.pin_bd_addr = p_data->rmt_oob.bd_addr;
         BTA_COPY_DEVICE_CLASS(bta_dm_cb.pin_dev_class,
                               p_data->rmt_oob.dev_class);
         if ((BTM_ReadRemoteDeviceName(p_data->rmt_oob.bd_addr,
@@ -2734,7 +2715,7 @@ static uint8_t bta_dm_sp_cback(tBTM_SP_EVT event, tBTM_SP_EVT_DATA* p_data) {
             " bta_dm_sp_cback() -> Failed to start Remote Name Request  ");
       }
 
-      bdcpy(sec_event.rmt_oob.bd_addr, p_data->rmt_oob.bd_addr);
+      sec_event.rmt_oob.bd_addr = p_data->rmt_oob.bd_addr;
       BTA_COPY_DEVICE_CLASS(sec_event.rmt_oob.dev_class,
                             p_data->rmt_oob.dev_class);
       strlcpy((char*)sec_event.rmt_oob.bd_name, (char*)p_data->rmt_oob.bd_name,
@@ -2778,7 +2759,7 @@ static uint8_t bta_dm_sp_cback(tBTM_SP_EVT event, tBTM_SP_EVT_DATA* p_data) {
  * Returns          void
  *
  ******************************************************************************/
-static void bta_dm_local_name_cback(UNUSED_ATTR uint8_t* p_name) {
+static void bta_dm_local_name_cback(UNUSED_ATTR const RawAddress& p_name) {
   tBTA_DM_SEC sec_event;
 
   sec_event.enable.status = BTA_SUCCESS;
@@ -2807,12 +2788,12 @@ static void bta_dm_bl_change_cback(tBTM_BL_EVENT_DATA* p_data) {
   switch (p_msg->event) {
     case BTM_BL_CONN_EVT:
       p_msg->is_new = true;
-      bdcpy(p_msg->bd_addr, p_data->conn.p_bda);
+      p_msg->bd_addr = *p_data->conn.p_bda;
       p_msg->transport = p_data->conn.transport;
       p_msg->handle = p_data->conn.handle;
       break;
     case BTM_BL_DISCN_EVT:
-      bdcpy(p_msg->bd_addr, p_data->discn.p_bda);
+      p_msg->bd_addr = *p_data->discn.p_bda;
       p_msg->transport = p_data->discn.transport;
       p_msg->handle = p_data->discn.handle;
       break;
@@ -2823,10 +2804,10 @@ static void bta_dm_bl_change_cback(tBTM_BL_EVENT_DATA* p_data) {
     case BTM_BL_ROLE_CHG_EVT:
       p_msg->new_role = p_data->role_chg.new_role;
       p_msg->hci_status = p_data->role_chg.hci_status;
-      bdcpy(p_msg->bd_addr, p_data->role_chg.p_bda);
+      p_msg->bd_addr = *p_data->role_chg.p_bda;
       break;
     case BTM_BL_COLLISION_EVT:
-      bdcpy(p_msg->bd_addr, p_data->conn.p_bda);
+      p_msg->bd_addr = *p_data->conn.p_bda;
       break;
   }
 
@@ -2885,7 +2866,7 @@ static bool bta_dm_check_av(uint16_t event) {
       APPL_TRACE_WARNING("[%d]: state:%d, info:x%x, avoid_rs %d", i,
                          p_dev->conn_state, p_dev->info, avoid_roleswitch);
       if ((p_dev->conn_state == BTA_DM_CONNECTED) &&
-          (p_dev->info & BTA_DM_DI_AV_ACTIVE) && (avoid_roleswitch == false)) {
+          (p_dev->info & BTA_DM_DI_AV_ACTIVE) && (!avoid_roleswitch)) {
         /* make master and take away the role switch policy */
         if (BTM_CMD_STARTED == BTM_SwitchRole(p_dev->peer_bdaddr,
                                               HCI_ROLE_MASTER,
@@ -2896,7 +2877,7 @@ static bool bta_dm_check_av(uint16_t event) {
         }
         /* else either already master or can not switch for some reasons */
         bta_dm_policy_cback(BTA_SYS_PLCY_CLR, 0, HCI_ENABLE_MASTER_SLAVE_SWITCH,
-                            p_dev->peer_bdaddr);
+                            &p_dev->peer_bdaddr);
         break;
       }
     }
@@ -2919,7 +2900,7 @@ void bta_dm_acl_change(tBTA_DM_MSG* p_data) {
   uint8_t* p;
   tBTA_DM_SEC conn;
   bool is_new = p_data->acl_change.is_new;
-  BD_ADDR_PTR p_bda = p_data->acl_change.bd_addr;
+  const RawAddress& p_bda = p_data->acl_change.bd_addr;
   bool need_policy_change = false;
   bool issue_unpair_cb = false;
 
@@ -2962,7 +2943,7 @@ void bta_dm_acl_change(tBTA_DM_MSG* p_data) {
           if (need_policy_change) {
             bta_dm_policy_cback(BTA_SYS_PLCY_CLR, 0,
                                 HCI_ENABLE_MASTER_SLAVE_SWITCH,
-                                p_dev->peer_bdaddr);
+                                &p_dev->peer_bdaddr);
           }
         } else {
           /* there's AV no activity on this link and role switch happened
@@ -2973,10 +2954,10 @@ void bta_dm_acl_change(tBTA_DM_MSG* p_data) {
         bta_sys_notify_role_chg(p_data->acl_change.bd_addr,
                                 p_data->acl_change.new_role,
                                 p_data->acl_change.hci_status);
-        bdcpy(conn.role_chg.bd_addr, p_bda);
+        conn.role_chg.bd_addr = p_bda;
         conn.role_chg.new_role = (uint8_t)p_data->acl_change.new_role;
         if (bta_dm_cb.p_sec_cback)
-          bta_dm_cb.p_sec_cback(BTA_DM_ROLE_CHG_EVT, (tBTA_DM_SEC*)&conn);
+          bta_dm_cb.p_sec_cback(BTA_DM_ROLE_CHG_EVT, &conn);
       }
       return;
   }
@@ -2989,7 +2970,7 @@ void bta_dm_acl_change(tBTA_DM_MSG* p_data) {
 
   if (is_new) {
     for (i = 0; i < bta_dm_cb.device_list.count; i++) {
-      if (!bdcmp(bta_dm_cb.device_list.peer_device[i].peer_bdaddr, p_bda) &&
+      if (bta_dm_cb.device_list.peer_device[i].peer_bdaddr == p_bda &&
           bta_dm_cb.device_list.peer_device[i].conn_handle ==
               p_data->acl_change.handle)
         break;
@@ -2997,9 +2978,8 @@ void bta_dm_acl_change(tBTA_DM_MSG* p_data) {
 
     if (i == bta_dm_cb.device_list.count) {
       if (bta_dm_cb.device_list.count < BTA_DM_NUM_PEER_DEVICE) {
-        bdcpy(bta_dm_cb.device_list.peer_device[bta_dm_cb.device_list.count]
-                  .peer_bdaddr,
-              p_bda);
+        bta_dm_cb.device_list.peer_device[bta_dm_cb.device_list.count]
+            .peer_bdaddr = p_bda;
         bta_dm_cb.device_list.peer_device[bta_dm_cb.device_list.count]
             .link_policy = bta_dm_cb.cur_policy;
         bta_dm_cb.device_list.count++;
@@ -3016,7 +2996,7 @@ void bta_dm_acl_change(tBTA_DM_MSG* p_data) {
 
     bta_dm_cb.device_list.peer_device[i].conn_state = BTA_DM_CONNECTED;
     bta_dm_cb.device_list.peer_device[i].pref_role = BTA_ANY_ROLE;
-    bdcpy(conn.link_up.bd_addr, p_bda);
+    conn.link_up.bd_addr = p_bda;
     bta_dm_cb.device_list.peer_device[i].info = BTA_DM_DI_NONE;
     conn.link_up.link_type = p_data->acl_change.transport;
     bta_dm_cb.device_list.peer_device[i].transport =
@@ -3032,11 +3012,10 @@ void bta_dm_acl_change(tBTA_DM_MSG* p_data) {
     APPL_TRACE_WARNING("%s info: 0x%x", __func__,
                        bta_dm_cb.device_list.peer_device[i].info);
 
-    if (bta_dm_cb.p_sec_cback)
-      bta_dm_cb.p_sec_cback(BTA_DM_LINK_UP_EVT, (tBTA_DM_SEC*)&conn);
+    if (bta_dm_cb.p_sec_cback) bta_dm_cb.p_sec_cback(BTA_DM_LINK_UP_EVT, &conn);
   } else {
     for (i = 0; i < bta_dm_cb.device_list.count; i++) {
-      if (bdcmp(bta_dm_cb.device_list.peer_device[i].peer_bdaddr, p_bda) ||
+      if (bta_dm_cb.device_list.peer_device[i].peer_bdaddr != p_bda ||
           bta_dm_cb.device_list.peer_device[i].transport !=
               p_data->acl_change.transport)
         continue;
@@ -3053,10 +3032,18 @@ void bta_dm_acl_change(tBTA_DM_MSG* p_data) {
       conn.link_down.is_removed =
           bta_dm_cb.device_list.peer_device[i].remove_dev_pending;
 
-      for (; i < bta_dm_cb.device_list.count; i++) {
+      // Iterate to the one before the last when shrinking the list,
+      // otherwise we memcpy garbage data into the record.
+      // Then clear out the last item in the list since we are shrinking.
+      for (; i < bta_dm_cb.device_list.count - 1; i++) {
         memcpy(&bta_dm_cb.device_list.peer_device[i],
                &bta_dm_cb.device_list.peer_device[i + 1],
                sizeof(bta_dm_cb.device_list.peer_device[i]));
+      }
+      if (bta_dm_cb.device_list.count > 0) {
+        int clear_index = bta_dm_cb.device_list.count - 1;
+        memset(&bta_dm_cb.device_list.peer_device[clear_index], 0,
+               sizeof(bta_dm_cb.device_list.peer_device[clear_index]));
       }
       break;
     }
@@ -3066,8 +3053,7 @@ void bta_dm_acl_change(tBTA_DM_MSG* p_data) {
       bta_dm_cb.device_list.le_count--;
     conn.link_down.link_type = p_data->acl_change.transport;
 
-    if (bta_dm_search_cb.wait_disc &&
-        !bdcmp(bta_dm_search_cb.peer_bdaddr, p_bda)) {
+    if (bta_dm_search_cb.wait_disc && bta_dm_search_cb.peer_bdaddr == p_bda) {
       bta_dm_search_cb.wait_disc = false;
 
       if (bta_dm_search_cb.sdp_results) {
@@ -3083,9 +3069,9 @@ void bta_dm_acl_change(tBTA_DM_MSG* p_data) {
          * Start a timer to make sure that the profiles
          * get the disconnect event.
          */
-        alarm_set_on_queue(
-            bta_dm_cb.disable_timer, BTA_DM_DISABLE_CONN_DOWN_TIMER_MS,
-            bta_dm_disable_conn_down_timer_cback, NULL, btu_bta_alarm_queue);
+        alarm_set_on_mloop(bta_dm_cb.disable_timer,
+                           BTA_DM_DISABLE_CONN_DOWN_TIMER_MS,
+                           bta_dm_disable_conn_down_timer_cback, NULL);
       }
     }
     if (conn.link_down.is_removed) {
@@ -3096,7 +3082,7 @@ void bta_dm_acl_change(tBTA_DM_MSG* p_data) {
       BTA_GATTC_Refresh(p_bda);
     }
 
-    bdcpy(conn.link_down.bd_addr, p_bda);
+    conn.link_down.bd_addr = p_bda;
     conn.link_down.status = (uint8_t)btm_get_acl_disc_reason_code();
     if (bta_dm_cb.p_sec_cback) {
       bta_dm_cb.p_sec_cback(BTA_DM_LINK_DOWN_EVT, &conn);
@@ -3147,12 +3133,12 @@ static void bta_dm_disable_conn_down_timer_cback(UNUSED_ATTR void* data) {
  *
  ******************************************************************************/
 static void bta_dm_rm_cback(tBTA_SYS_CONN_STATUS status, uint8_t id,
-                            uint8_t app_id, BD_ADDR peer_addr) {
+                            uint8_t app_id, const RawAddress* peer_addr) {
   uint8_t j;
   tBTA_PREF_ROLES role;
   tBTA_DM_PEER_DEVICE* p_dev;
 
-  p_dev = bta_dm_find_peer_device(peer_addr);
+  p_dev = bta_dm_find_peer_device(*peer_addr);
   if (status == BTA_SYS_CONN_OPEN) {
     if (p_dev) {
       /* Do not set to connected if we are in the middle of unpairing. When AV
@@ -3224,10 +3210,9 @@ static void bta_dm_delay_role_switch_cback(UNUSED_ATTR void* data) {
  * Returns          void
  *
  ******************************************************************************/
-static void bta_dm_reset_sec_dev_pending(BD_ADDR remote_bd_addr) {
+static void bta_dm_reset_sec_dev_pending(const RawAddress& remote_bd_addr) {
   for (size_t i = 0; i < bta_dm_cb.device_list.count; i++) {
-    if (bdcmp(bta_dm_cb.device_list.peer_device[i].peer_bdaddr,
-              remote_bd_addr) == 0) {
+    if (bta_dm_cb.device_list.peer_device[i].peer_bdaddr == remote_bd_addr) {
       bta_dm_cb.device_list.peer_device[i].remove_dev_pending = false;
       return;
     }
@@ -3247,7 +3232,7 @@ static void bta_dm_reset_sec_dev_pending(BD_ADDR remote_bd_addr) {
  * Returns          void
  *
  ******************************************************************************/
-static void bta_dm_remove_sec_dev_entry(BD_ADDR remote_bd_addr) {
+static void bta_dm_remove_sec_dev_entry(const RawAddress& remote_bd_addr) {
   if (BTM_IsAclConnectionUp(remote_bd_addr, BT_TRANSPORT_LE) ||
       BTM_IsAclConnectionUp(remote_bd_addr, BT_TRANSPORT_BR_EDR)) {
     APPL_TRACE_DEBUG(
@@ -3255,8 +3240,7 @@ static void bta_dm_remove_sec_dev_entry(BD_ADDR remote_bd_addr) {
         __func__);
     BTM_SecClearSecurityFlags(remote_bd_addr);
     for (int i = 0; i < bta_dm_cb.device_list.count; i++) {
-      if (!bdcmp(bta_dm_cb.device_list.peer_device[i].peer_bdaddr,
-                 remote_bd_addr)) {
+      if (bta_dm_cb.device_list.peer_device[i].peer_bdaddr == remote_bd_addr) {
         bta_dm_cb.device_list.peer_device[i].remove_dev_pending = TRUE;
         break;
       }
@@ -3319,13 +3303,13 @@ static void bta_dm_adjust_roles(bool delay_role_switch) {
 
           if (bta_dm_cb.device_list.peer_device[i].pref_role !=
                   BTA_SLAVE_ROLE_ONLY &&
-              delay_role_switch == false) {
+              !delay_role_switch) {
             BTM_SwitchRole(bta_dm_cb.device_list.peer_device[i].peer_bdaddr,
                            HCI_ROLE_MASTER, NULL);
           } else {
-            alarm_set_on_queue(
-                bta_dm_cb.switch_delay_timer, BTA_DM_SWITCH_DELAY_TIMER_MS,
-                bta_dm_delay_role_switch_cback, NULL, btu_bta_alarm_queue);
+            alarm_set_on_mloop(bta_dm_cb.switch_delay_timer,
+                               BTA_DM_SWITCH_DELAY_TIMER_MS,
+                               bta_dm_delay_role_switch_cback, NULL);
           }
         }
       }
@@ -3470,16 +3454,16 @@ static void bta_dm_set_eir(char* local_name) {
   if (local_name_len > p_bta_dm_eir_cfg->bta_dm_eir_min_name_len) {
 /* get number of UUID 16-bit list */
 #if (BTA_EIR_CANNED_UUID_LIST == TRUE)
-    num_uuid = p_bta_dm_eir_cfg->bta_dm_eir_uuid16_len / LEN_UUID_16;
+    num_uuid = p_bta_dm_eir_cfg->bta_dm_eir_uuid16_len / Uuid::kNumBytes16;
 #else   // BTA_EIR_CANNED_UUID_LIST
-    max_num_uuid = (free_eir_length - 2) / LEN_UUID_16;
+    max_num_uuid = (free_eir_length - 2) / Uuid::kNumBytes16;
     data_type = BTM_GetEirSupportedServices(bta_dm_cb.eir_uuid, &p,
                                             max_num_uuid, &num_uuid);
     p = (uint8_t*)p_buf + BTM_HCI_EIR_OFFSET; /* reset p */
 #endif  // BTA_EIR_CANNED_UUID_LIST
 
     /* if UUID doesn't fit remaing space, shorten local name */
-    if (local_name_len > (free_eir_length - 4 - num_uuid * LEN_UUID_16)) {
+    if (local_name_len > (free_eir_length - 4 - num_uuid * Uuid::kNumBytes16)) {
       local_name_len = find_utf8_char_boundary(
           local_name, p_bta_dm_eir_cfg->bta_dm_eir_min_name_len);
       APPL_TRACE_WARNING("%s local name is shortened (%d)", __func__,
@@ -3503,23 +3487,24 @@ static void bta_dm_set_eir(char* local_name) {
   /* if UUID list is provided as static data in configuration */
   if ((p_bta_dm_eir_cfg->bta_dm_eir_uuid16_len > 0) &&
       (p_bta_dm_eir_cfg->bta_dm_eir_uuid16)) {
-    if (free_eir_length > LEN_UUID_16 + 2) {
+    if (free_eir_length > Uuid::kNumBytes16 + 2) {
       free_eir_length -= 2;
 
       if (free_eir_length >= p_bta_dm_eir_cfg->bta_dm_eir_uuid16_len) {
-        num_uuid = p_bta_dm_eir_cfg->bta_dm_eir_uuid16_len / LEN_UUID_16;
+        num_uuid = p_bta_dm_eir_cfg->bta_dm_eir_uuid16_len / Uuid::kNumBytes16;
         data_type = BTM_EIR_COMPLETE_16BITS_UUID_TYPE;
       } else /* not enough room for all UUIDs */
       {
         APPL_TRACE_WARNING("BTA EIR: UUID 16-bit list is truncated");
-        num_uuid = free_eir_length / LEN_UUID_16;
+        num_uuid = free_eir_length / Uuid::kNumBytes16;
         data_type = BTM_EIR_MORE_16BITS_UUID_TYPE;
       }
-      UINT8_TO_STREAM(p, num_uuid * LEN_UUID_16 + 1);
+      UINT8_TO_STREAM(p, num_uuid * Uuid::kNumBytes16 + 1);
       UINT8_TO_STREAM(p, data_type);
-      memcpy(p, p_bta_dm_eir_cfg->bta_dm_eir_uuid16, num_uuid * LEN_UUID_16);
-      p += num_uuid * LEN_UUID_16;
-      free_eir_length -= num_uuid * LEN_UUID_16;
+      memcpy(p, p_bta_dm_eir_cfg->bta_dm_eir_uuid16,
+             num_uuid * Uuid::kNumBytes16);
+      p += num_uuid * Uuid::kNumBytes16;
+      free_eir_length -= num_uuid * Uuid::kNumBytes16;
     }
   }
 #else /* (BTA_EIR_CANNED_UUID_LIST == TRUE) */
@@ -3529,7 +3514,7 @@ static void bta_dm_set_eir(char* local_name) {
     p_type = p++;
     num_uuid = 0;
 
-    max_num_uuid = (free_eir_length - 2) / LEN_UUID_16;
+    max_num_uuid = (free_eir_length - 2) / Uuid::kNumBytes16;
     data_type = BTM_GetEirSupportedServices(bta_dm_cb.eir_uuid, &p,
                                             max_num_uuid, &num_uuid);
 
@@ -3541,10 +3526,10 @@ static void bta_dm_set_eir(char* local_name) {
       for (custom_uuid_idx = 0;
            custom_uuid_idx < BTA_EIR_SERVER_NUM_CUSTOM_UUID;
            custom_uuid_idx++) {
-        if (bta_dm_cb.custom_uuid[custom_uuid_idx].len == LEN_UUID_16) {
+        const Uuid& curr = bta_dm_cb.custom_uuid[custom_uuid_idx];
+        if (curr.GetShortestRepresentationSize() == Uuid::kNumBytes16) {
           if (num_uuid < max_num_uuid) {
-            UINT16_TO_STREAM(p,
-                             bta_dm_cb.custom_uuid[custom_uuid_idx].uu.uuid16);
+            UINT16_TO_STREAM(p, curr.As16Bit());
             num_uuid++;
           } else {
             data_type = BTM_EIR_MORE_16BITS_UUID_TYPE;
@@ -3556,9 +3541,9 @@ static void bta_dm_set_eir(char* local_name) {
     }
 #endif /* (BTA_EIR_SERVER_NUM_CUSTOM_UUID > 0) */
 
-    UINT8_TO_STREAM(p_length, num_uuid * LEN_UUID_16 + 1);
+    UINT8_TO_STREAM(p_length, num_uuid * Uuid::kNumBytes16 + 1);
     UINT8_TO_STREAM(p_type, data_type);
-    free_eir_length -= num_uuid * LEN_UUID_16 + 2;
+    free_eir_length -= num_uuid * Uuid::kNumBytes16 + 2;
   }
 #endif /* (BTA_EIR_CANNED_UUID_LIST == TRUE) */
 
@@ -3570,13 +3555,14 @@ static void bta_dm_set_eir(char* local_name) {
     num_uuid = 0;
     data_type = BTM_EIR_COMPLETE_32BITS_UUID_TYPE;
 
-    max_num_uuid = (free_eir_length - 2) / LEN_UUID_32;
+    max_num_uuid = (free_eir_length - 2) / Uuid::kNumBytes32;
 
     for (custom_uuid_idx = 0; custom_uuid_idx < BTA_EIR_SERVER_NUM_CUSTOM_UUID;
          custom_uuid_idx++) {
-      if (bta_dm_cb.custom_uuid[custom_uuid_idx].len == LEN_UUID_32) {
+      const Uuid& curr = bta_dm_cb.custom_uuid[custom_uuid_idx];
+      if (curr.GetShortestRepresentationSize() == Uuid::kNumBytes32) {
         if (num_uuid < max_num_uuid) {
-          UINT32_TO_STREAM(p, bta_dm_cb.custom_uuid[custom_uuid_idx].uu.uuid32);
+          UINT32_TO_STREAM(p, curr.As32Bit());
           num_uuid++;
         } else {
           data_type = BTM_EIR_MORE_32BITS_UUID_TYPE;
@@ -3586,9 +3572,9 @@ static void bta_dm_set_eir(char* local_name) {
       }
     }
 
-    UINT8_TO_STREAM(p_length, num_uuid * LEN_UUID_32 + 1);
+    UINT8_TO_STREAM(p_length, num_uuid * Uuid::kNumBytes32 + 1);
     UINT8_TO_STREAM(p_type, data_type);
-    free_eir_length -= num_uuid * LEN_UUID_32 + 2;
+    free_eir_length -= num_uuid * Uuid::kNumBytes32 + 2;
   }
 
   /* Adding 128-bit UUID list */
@@ -3598,14 +3584,14 @@ static void bta_dm_set_eir(char* local_name) {
     num_uuid = 0;
     data_type = BTM_EIR_COMPLETE_128BITS_UUID_TYPE;
 
-    max_num_uuid = (free_eir_length - 2) / LEN_UUID_128;
+    max_num_uuid = (free_eir_length - 2) / Uuid::kNumBytes128;
 
     for (custom_uuid_idx = 0; custom_uuid_idx < BTA_EIR_SERVER_NUM_CUSTOM_UUID;
          custom_uuid_idx++) {
-      if (bta_dm_cb.custom_uuid[custom_uuid_idx].len == LEN_UUID_128) {
+      const Uuid& curr = bta_dm_cb.custom_uuid[custom_uuid_idx];
+      if (curr.GetShortestRepresentationSize() == Uuid::kNumBytes128) {
         if (num_uuid < max_num_uuid) {
-          ARRAY16_TO_STREAM(p,
-                            bta_dm_cb.custom_uuid[custom_uuid_idx].uu.uuid128);
+          ARRAY16_TO_STREAM(p, curr.To128BitBE().data());
           num_uuid++;
         } else {
           data_type = BTM_EIR_MORE_128BITS_UUID_TYPE;
@@ -3615,9 +3601,9 @@ static void bta_dm_set_eir(char* local_name) {
       }
     }
 
-    UINT8_TO_STREAM(p_length, num_uuid * LEN_UUID_128 + 1);
+    UINT8_TO_STREAM(p_length, num_uuid * Uuid::kNumBytes128 + 1);
     UINT8_TO_STREAM(p_type, data_type);
-    free_eir_length -= num_uuid * LEN_UUID_128 + 2;
+    free_eir_length -= num_uuid * Uuid::kNumBytes128 + 2;
   }
 #endif /* ( BTA_EIR_CANNED_UUID_LIST != TRUE \
           )&&(BTA_EIR_SERVER_NUM_CUSTOM_UUID > 0) */
@@ -3680,11 +3666,8 @@ static void bta_dm_eir_search_services(tBTM_INQ_RESULTS* p_result,
   tBTA_SERVICE_MASK service_index = 0;
   tBTM_EIR_SEARCH_RESULT result;
 
-  APPL_TRACE_DEBUG(
-      "BTA searching services in EIR of BDA:0x%02X%02X%02X%02X%02X%02X",
-      p_result->remote_bd_addr[0], p_result->remote_bd_addr[1],
-      p_result->remote_bd_addr[2], p_result->remote_bd_addr[3],
-      p_result->remote_bd_addr[4], p_result->remote_bd_addr[5]);
+  VLOG(1) << "BTA searching services in EIR of BDA:"
+          << p_result->remote_bd_addr;
 
   APPL_TRACE_DEBUG("    with services_to_search=0x%08X", *p_services_to_search);
 
@@ -3818,14 +3801,14 @@ void bta_dm_execute_callback(tBTA_DM_MSG* p_data) {
  * Returns         None
  *
  ******************************************************************************/
-void bta_dm_encrypt_cback(BD_ADDR bd_addr, tBT_TRANSPORT transport,
+void bta_dm_encrypt_cback(const RawAddress* bd_addr, tBT_TRANSPORT transport,
                           UNUSED_ATTR void* p_ref_data, tBTM_STATUS result) {
   tBTA_STATUS bta_status = BTA_SUCCESS;
   tBTA_DM_ENCRYPT_CBACK* p_callback = NULL;
   uint8_t i;
 
   for (i = 0; i < bta_dm_cb.device_list.count; i++) {
-    if (bdcmp(bta_dm_cb.device_list.peer_device[i].peer_bdaddr, bd_addr) == 0 &&
+    if (bta_dm_cb.device_list.peer_device[i].peer_bdaddr == *bd_addr &&
         bta_dm_cb.device_list.peer_device[i].conn_state == BTA_DM_CONNECTED)
       break;
   }
@@ -3856,7 +3839,7 @@ void bta_dm_encrypt_cback(BD_ADDR bd_addr, tBT_TRANSPORT transport,
                    bta_status, p_callback);
 
   if (p_callback) {
-    (*p_callback)(bd_addr, transport, bta_status);
+    (*p_callback)(*bd_addr, transport, bta_status);
   }
 }
 
@@ -3878,8 +3861,8 @@ void bta_dm_set_encryption(tBTA_DM_MSG* p_data) {
     return;
   }
   for (i = 0; i < bta_dm_cb.device_list.count; i++) {
-    if (bdcmp(bta_dm_cb.device_list.peer_device[i].peer_bdaddr,
-              p_data->set_encryption.bd_addr) == 0 &&
+    if (bta_dm_cb.device_list.peer_device[i].peer_bdaddr ==
+            p_data->set_encryption.bd_addr &&
         bta_dm_cb.device_list.peer_device[i].conn_state == BTA_DM_CONNECTED)
       break;
   }
@@ -3902,20 +3885,20 @@ void bta_dm_set_encryption(tBTA_DM_MSG* p_data) {
   }
 }
 
-bool bta_dm_check_if_only_hd_connected(BD_ADDR peer_addr) {
+bool bta_dm_check_if_only_hd_connected(const RawAddress& peer_addr) {
   APPL_TRACE_DEBUG("%s: count(%d)", __func__, bta_dm_conn_srvcs.count);
 
   for (uint8_t j = 0; j < bta_dm_conn_srvcs.count; j++) {
     // Check if profiles other than hid are connected
     if ((bta_dm_conn_srvcs.conn_srvc[j].id != BTA_ID_HD) &&
-        !bdcmp(bta_dm_conn_srvcs.conn_srvc[j].peer_bdaddr, peer_addr)) {
+        bta_dm_conn_srvcs.conn_srvc[j].peer_bdaddr == peer_addr) {
       APPL_TRACE_DEBUG("%s: Another profile (id=%d) is connected", __func__,
                        bta_dm_conn_srvcs.conn_srvc[j].id);
-      return FALSE;
+      return false;
     }
   }
 
-  return TRUE;
+  return true;
 }
 
 /*******************************************************************************
@@ -3928,21 +3911,28 @@ bool bta_dm_check_if_only_hd_connected(BD_ADDR peer_addr) {
  * Returns          void
  *
  ******************************************************************************/
-static void bta_dm_observe_results_cb(tBTM_INQ_RESULTS* p_inq, uint8_t* p_eir) {
-  ;
+static void bta_dm_observe_results_cb(tBTM_INQ_RESULTS* p_inq, uint8_t* p_eir,
+                                      uint16_t eir_len) {
   tBTA_DM_SEARCH result;
   tBTM_INQ_INFO* p_inq_info;
-  APPL_TRACE_DEBUG("bta_dm_observe_results_cb")
+  APPL_TRACE_DEBUG("bta_dm_observe_results_cb");
 
-  bdcpy(result.inq_res.bd_addr, p_inq->remote_bd_addr);
+  result.inq_res.bd_addr = p_inq->remote_bd_addr;
   result.inq_res.rssi = p_inq->rssi;
   result.inq_res.ble_addr_type = p_inq->ble_addr_type;
   result.inq_res.inq_result_type = p_inq->inq_result_type;
   result.inq_res.device_type = p_inq->device_type;
   result.inq_res.flag = p_inq->flag;
+  result.inq_res.ble_evt_type = p_inq->ble_evt_type;
+  result.inq_res.ble_primary_phy = p_inq->ble_primary_phy;
+  result.inq_res.ble_secondary_phy = p_inq->ble_secondary_phy;
+  result.inq_res.ble_advertising_sid = p_inq->ble_advertising_sid;
+  result.inq_res.ble_tx_power = p_inq->ble_tx_power;
+  result.inq_res.ble_periodic_adv_int = p_inq->ble_periodic_adv_int;
 
   /* application will parse EIR to find out remote device name */
   result.inq_res.p_eir = p_eir;
+  result.inq_res.eir_len = eir_len;
 
   p_inq_info = BTM_InqDbRead(p_inq->remote_bd_addr);
   if (p_inq_info != NULL) {
@@ -3993,7 +3983,7 @@ static void bta_dm_observe_cmpl_cb(void* p_result) {
  * Returns          void
  *
  ******************************************************************************/
-static uint8_t bta_dm_ble_smp_cback(tBTM_LE_EVT event, BD_ADDR bda,
+static uint8_t bta_dm_ble_smp_cback(tBTM_LE_EVT event, const RawAddress& bda,
                                     tBTM_LE_EVT_DATA* p_data) {
   tBTM_STATUS status = BTM_SUCCESS;
   tBTA_DM_SEC sec_event;
@@ -4017,7 +4007,7 @@ static uint8_t bta_dm_ble_smp_cback(tBTM_LE_EVT event, BD_ADDR bda,
       break;
 
     case BTM_LE_SEC_REQUEST_EVT:
-      bdcpy(sec_event.ble_req.bd_addr, bda);
+      sec_event.ble_req.bd_addr = bda;
       p_name = BTM_SecReadDevName(bda);
       if (p_name != NULL)
         strlcpy((char*)sec_event.ble_req.bd_name, p_name, BD_NAME_LEN);
@@ -4027,7 +4017,7 @@ static uint8_t bta_dm_ble_smp_cback(tBTM_LE_EVT event, BD_ADDR bda,
       break;
 
     case BTM_LE_KEY_NOTIF_EVT:
-      bdcpy(sec_event.key_notif.bd_addr, bda);
+      sec_event.key_notif.bd_addr = bda;
       p_name = BTM_SecReadDevName(bda);
       if (p_name != NULL)
         strlcpy((char*)sec_event.key_notif.bd_name, p_name, BD_NAME_LEN);
@@ -4038,17 +4028,17 @@ static uint8_t bta_dm_ble_smp_cback(tBTM_LE_EVT event, BD_ADDR bda,
       break;
 
     case BTM_LE_KEY_REQ_EVT:
-      bdcpy(sec_event.ble_req.bd_addr, bda);
+      sec_event.ble_req.bd_addr = bda;
       bta_dm_cb.p_sec_cback(BTA_DM_BLE_PASSKEY_REQ_EVT, &sec_event);
       break;
 
     case BTM_LE_OOB_REQ_EVT:
-      bdcpy(sec_event.ble_req.bd_addr, bda);
+      sec_event.ble_req.bd_addr = bda;
       bta_dm_cb.p_sec_cback(BTA_DM_BLE_OOB_REQ_EVT, &sec_event);
       break;
 
     case BTM_LE_NC_REQ_EVT:
-      bdcpy(sec_event.key_notif.bd_addr, bda);
+      sec_event.key_notif.bd_addr = bda;
       strlcpy((char*)sec_event.key_notif.bd_name, bta_dm_get_remname(),
               (BD_NAME_LEN));
       sec_event.key_notif.passkey = p_data->key_notif;
@@ -4056,19 +4046,19 @@ static uint8_t bta_dm_ble_smp_cback(tBTM_LE_EVT event, BD_ADDR bda,
       break;
 
     case BTM_LE_SC_OOB_REQ_EVT:
-      bdcpy(sec_event.ble_req.bd_addr, bda);
+      sec_event.ble_req.bd_addr = bda;
       bta_dm_cb.p_sec_cback(BTA_DM_BLE_SC_OOB_REQ_EVT, &sec_event);
       break;
 
     case BTM_LE_KEY_EVT:
-      bdcpy(sec_event.ble_key.bd_addr, bda);
+      sec_event.ble_key.bd_addr = bda;
       sec_event.ble_key.key_type = p_data->key.key_type;
       sec_event.ble_key.p_key_value = p_data->key.p_key_value;
       bta_dm_cb.p_sec_cback(BTA_DM_BLE_KEY_EVT, &sec_event);
       break;
 
     case BTM_LE_COMPLT_EVT:
-      bdcpy(sec_event.auth_cmpl.bd_addr, bda);
+      sec_event.auth_cmpl.bd_addr = bda;
       BTM_ReadDevInfo(bda, &sec_event.auth_cmpl.dev_type,
                       &sec_event.auth_cmpl.addr_type);
       p_name = BTM_SecReadDevName(bda);
@@ -4150,13 +4140,8 @@ void bta_dm_add_blekey(tBTA_DM_MSG* p_data) {
   if (!BTM_SecAddBleKey(p_data->add_ble_key.bd_addr,
                         (tBTM_LE_KEY_VALUE*)&p_data->add_ble_key.blekey,
                         p_data->add_ble_key.key_type)) {
-    APPL_TRACE_ERROR(
-        "BTA_DM: Error adding BLE Key for device %08x%04x",
-        (p_data->add_ble_key.bd_addr[0] << 24) +
-            (p_data->add_ble_key.bd_addr[1] << 16) +
-            (p_data->add_ble_key.bd_addr[2] << 8) +
-            p_data->add_ble_key.bd_addr[3],
-        (p_data->add_ble_key.bd_addr[4] << 8) + p_data->add_ble_key.bd_addr[5]);
+    LOG(ERROR) << "BTA_DM: Error adding BLE Key for device "
+               << p_data->add_ble_key.bd_addr;
   }
 }
 
@@ -4176,13 +4161,8 @@ void bta_dm_add_ble_device(tBTA_DM_MSG* p_data) {
   if (!BTM_SecAddBleDevice(p_data->add_ble_device.bd_addr, NULL,
                            p_data->add_ble_device.dev_type,
                            p_data->add_ble_device.addr_type)) {
-    APPL_TRACE_ERROR("BTA_DM: Error adding BLE Device for device %08x%04x",
-                     (p_data->add_ble_device.bd_addr[0] << 24) +
-                         (p_data->add_ble_device.bd_addr[1] << 16) +
-                         (p_data->add_ble_device.bd_addr[2] << 8) +
-                         p_data->add_ble_device.bd_addr[3],
-                     (p_data->add_ble_device.bd_addr[4] << 8) +
-                         p_data->add_ble_device.bd_addr[5]);
+    LOG(ERROR) << "BTA_DM: Error adding BLE Device for device "
+               << p_data->add_ble_device.bd_addr;
   }
 }
 
@@ -4439,7 +4419,7 @@ static void bta_dm_gattc_register(void) {
   if (bta_dm_search_cb.client_if == BTA_GATTS_INVALID_IF) {
     BTA_GATTC_AppRegister(bta_dm_gattc_callback,
                           base::Bind([](uint8_t client_id, uint8_t status) {
-                            if (status == BTA_GATT_OK)
+                            if (status == GATT_SUCCESS)
                               bta_dm_search_cb.client_if = client_id;
                             else
                               bta_dm_search_cb.client_if = BTA_GATTS_INVALID_IF;
@@ -4458,11 +4438,8 @@ static void bta_dm_gattc_register(void) {
  *
  ******************************************************************************/
 static void btm_dm_start_disc_gatt_services(uint16_t conn_id) {
-  tBT_UUID* p_uuid = bta_dm_search_cb.p_srvc_uuid + bta_dm_search_cb.num_uuid -
-                     bta_dm_search_cb.uuid_to_search;
-
-  p_uuid = bta_dm_search_cb.p_srvc_uuid + bta_dm_search_cb.num_uuid -
-           bta_dm_search_cb.uuid_to_search;
+  Uuid* p_uuid = bta_dm_search_cb.p_srvc_uuid + bta_dm_search_cb.num_uuid -
+                 bta_dm_search_cb.uuid_to_search;
 
   /* always search for all services */
   BTA_GATTC_ServiceSearchRequest(conn_id, p_uuid);
@@ -4481,19 +4458,22 @@ static void bta_dm_gatt_disc_result(tBTA_GATT_ID service_id) {
   tBTA_DM_SEARCH result;
 
   /*
-      * This logic will not work for gatt case.  We are checking against the
+   * This logic will not work for gatt case.  We are checking against the
    * bluetooth profiles here
-      * just copy the GATTID in raw data field and send it across.
-      */
+   * just copy the GATTID in raw data field and send it across.
+   */
 
   if (bta_dm_search_cb.ble_raw_used + sizeof(tBTA_GATT_ID) <
       bta_dm_search_cb.ble_raw_size) {
     APPL_TRACE_DEBUG(
-        "ADDING BLE SERVICE uuid=0x%x, ble_ptr = 0x%x, ble_raw_used = 0x%x",
-        service_id.uuid.uu.uuid16, bta_dm_search_cb.p_ble_rawdata,
+        "ADDING BLE SERVICE uuid=%s, ble_ptr = 0x%x, ble_raw_used = 0x%x",
+        service_id.uuid.ToString().c_str(), bta_dm_search_cb.p_ble_rawdata,
         bta_dm_search_cb.ble_raw_used);
 
     if (bta_dm_search_cb.p_ble_rawdata) {
+      // TODO(jpawlowski): the p_ble_raw data is only sent to btif_dm.cc, but is
+      // never used there. Get rid of this code completly, or implement the
+      // TODOs from btif_dm.cc
       memcpy((bta_dm_search_cb.p_ble_rawdata + bta_dm_search_cb.ble_raw_used),
              &service_id, sizeof(service_id));
 
@@ -4509,14 +4489,14 @@ static void bta_dm_gatt_disc_result(tBTA_GATT_ID service_id) {
         __func__, bta_dm_search_cb.ble_raw_size, bta_dm_search_cb.ble_raw_used);
   }
 
-  LOG_INFO(LOG_TAG, "%s service_id_uuid_len=%d ", __func__,
-           service_id.uuid.len);
+  LOG_INFO(LOG_TAG, "%s service_id_uuid_len=%zu", __func__,
+           service_id.uuid.GetShortestRepresentationSize());
   if (bta_dm_search_cb.state != BTA_DM_SEARCH_IDLE) {
     /* send result back to app now, one by one */
-    bdcpy(result.disc_ble_res.bd_addr, bta_dm_search_cb.peer_bdaddr);
+    result.disc_ble_res.bd_addr = bta_dm_search_cb.peer_bdaddr;
     strlcpy((char*)result.disc_ble_res.bd_name, bta_dm_get_remname(),
             BD_NAME_LEN);
-    memcpy(&result.disc_ble_res.service, &service_id.uuid, sizeof(tBT_UUID));
+    result.disc_ble_res.service = service_id.uuid;
 
     bta_dm_search_cb.p_search_cback(BTA_DM_DISC_BLE_RES_EVT, &result);
   }
@@ -4531,13 +4511,12 @@ static void bta_dm_gatt_disc_result(tBTA_GATT_ID service_id) {
  * Parameters:
  *
  ******************************************************************************/
-static void bta_dm_gatt_disc_complete(uint16_t conn_id,
-                                      tBTA_GATT_STATUS status) {
+static void bta_dm_gatt_disc_complete(uint16_t conn_id, tGATT_STATUS status) {
   APPL_TRACE_DEBUG("%s conn_id = %d", __func__, conn_id);
 
   if (bta_dm_search_cb.uuid_to_search > 0) bta_dm_search_cb.uuid_to_search--;
 
-  if (status == BTA_GATT_OK && bta_dm_search_cb.uuid_to_search > 0) {
+  if (status == GATT_SUCCESS && bta_dm_search_cb.uuid_to_search > 0) {
     btm_dm_start_disc_gatt_services(conn_id);
   } else {
     tBTA_DM_MSG* p_msg = (tBTA_DM_MSG*)osi_malloc(sizeof(tBTA_DM_MSG));
@@ -4547,15 +4526,14 @@ static void bta_dm_gatt_disc_complete(uint16_t conn_id,
     /* no more services to be discovered */
     p_msg->hdr.event = BTA_DM_DISCOVERY_RESULT_EVT;
     p_msg->disc_result.result.disc_res.result =
-        (status == BTA_GATT_OK) ? BTA_SUCCESS : BTA_FAILURE;
+        (status == GATT_SUCCESS) ? BTA_SUCCESS : BTA_FAILURE;
     APPL_TRACE_DEBUG("%s service found: 0x%08x", __func__,
                      bta_dm_search_cb.services_found);
     p_msg->disc_result.result.disc_res.services =
         bta_dm_search_cb.services_found;
     p_msg->disc_result.result.disc_res.num_uuids = 0;
     p_msg->disc_result.result.disc_res.p_uuid_list = NULL;
-    bdcpy(p_msg->disc_result.result.disc_res.bd_addr,
-          bta_dm_search_cb.peer_bdaddr);
+    p_msg->disc_result.result.disc_res.bd_addr = bta_dm_search_cb.peer_bdaddr;
     strlcpy((char*)p_msg->disc_result.result.disc_res.bd_name,
             bta_dm_get_remname(), BD_NAME_LEN);
 
@@ -4576,12 +4554,12 @@ static void bta_dm_gatt_disc_complete(uint16_t conn_id,
 
     bta_sys_sendmsg(p_msg);
 
-    if (conn_id != BTA_GATT_INVALID_CONN_ID) {
+    if (conn_id != GATT_INVALID_CONN_ID) {
       /* start a GATT channel close delay timer */
       bta_sys_start_timer(bta_dm_search_cb.gatt_close_timer,
                           BTA_DM_GATT_CLOSE_DELAY_TOUT,
                           BTA_DM_DISC_CLOSE_TOUT_EVT, 0);
-      bdcpy(bta_dm_search_cb.pending_close_bda, bta_dm_search_cb.peer_bdaddr);
+      bta_dm_search_cb.pending_close_bda = bta_dm_search_cb.peer_bdaddr;
     }
     bta_dm_search_cb.gatt_disc_active = false;
   }
@@ -4598,11 +4576,11 @@ static void bta_dm_gatt_disc_complete(uint16_t conn_id,
  *
  ******************************************************************************/
 void bta_dm_close_gatt_conn(UNUSED_ATTR tBTA_DM_MSG* p_data) {
-  if (bta_dm_search_cb.conn_id != BTA_GATT_INVALID_CONN_ID)
+  if (bta_dm_search_cb.conn_id != GATT_INVALID_CONN_ID)
     BTA_GATTC_Close(bta_dm_search_cb.conn_id);
 
-  memset(bta_dm_search_cb.pending_close_bda, 0, BD_ADDR_LEN);
-  bta_dm_search_cb.conn_id = BTA_GATT_INVALID_CONN_ID;
+  bta_dm_search_cb.pending_close_bda = RawAddress::kEmpty;
+  bta_dm_search_cb.conn_id = GATT_INVALID_CONN_ID;
 }
 /*******************************************************************************
  *
@@ -4614,18 +4592,24 @@ void bta_dm_close_gatt_conn(UNUSED_ATTR tBTA_DM_MSG* p_data) {
  * Parameters:
  *
  ******************************************************************************/
-void btm_dm_start_gatt_discovery(BD_ADDR bd_addr) {
+void btm_dm_start_gatt_discovery(const RawAddress& bd_addr) {
   bta_dm_search_cb.gatt_disc_active = true;
 
   /* connection is already open */
-  if (bdcmp(bta_dm_search_cb.pending_close_bda, bd_addr) == 0 &&
-      bta_dm_search_cb.conn_id != BTA_GATT_INVALID_CONN_ID) {
-    memset(bta_dm_search_cb.pending_close_bda, 0, BD_ADDR_LEN);
+  if (bta_dm_search_cb.pending_close_bda == bd_addr &&
+      bta_dm_search_cb.conn_id != GATT_INVALID_CONN_ID) {
+    bta_dm_search_cb.pending_close_bda = RawAddress::kEmpty;
     alarm_cancel(bta_dm_search_cb.gatt_close_timer);
     btm_dm_start_disc_gatt_services(bta_dm_search_cb.conn_id);
-  } else
-    BTA_GATTC_Open(bta_dm_search_cb.client_if, bd_addr, true,
-                   BTA_GATT_TRANSPORT_LE);
+  } else {
+    if (BTM_IsAclConnectionUp(bd_addr, BT_TRANSPORT_LE)) {
+      BTA_GATTC_Open(bta_dm_search_cb.client_if, bd_addr, true,
+                     GATT_TRANSPORT_LE, true);
+    } else {
+      BTA_GATTC_Open(bta_dm_search_cb.client_if, bd_addr, true,
+                     GATT_TRANSPORT_LE, false);
+    }
+  }
 }
 
 /*******************************************************************************
@@ -4637,13 +4621,12 @@ void btm_dm_start_gatt_discovery(BD_ADDR bd_addr) {
  * Parameters:
  *
  ******************************************************************************/
-static void bta_dm_cancel_gatt_discovery(BD_ADDR bd_addr) {
-  if (bta_dm_search_cb.conn_id == BTA_GATT_INVALID_CONN_ID) {
+static void bta_dm_cancel_gatt_discovery(const RawAddress& bd_addr) {
+  if (bta_dm_search_cb.conn_id == GATT_INVALID_CONN_ID) {
     BTA_GATTC_CancelOpen(bta_dm_search_cb.client_if, bd_addr, true);
   }
 
-  bta_dm_gatt_disc_complete(bta_dm_search_cb.conn_id,
-                            (tBTA_GATT_STATUS)BTA_GATT_ERROR);
+  bta_dm_gatt_disc_complete(bta_dm_search_cb.conn_id, (tGATT_STATUS)GATT_ERROR);
 }
 
 /*******************************************************************************
@@ -4656,30 +4639,19 @@ static void bta_dm_cancel_gatt_discovery(BD_ADDR bd_addr) {
  *
  ******************************************************************************/
 void bta_dm_proc_open_evt(tBTA_GATTC_OPEN* p_data) {
-  uint8_t* p1;
-  uint8_t* p2;
-
-  p1 = bta_dm_search_cb.peer_bdaddr;
-  p2 = p_data->remote_bda;
-
-  APPL_TRACE_DEBUG(
-      "DM Search state= %d search_cb.peer_dbaddr: [%08x%04x] connected_bda= "
-      "[%08x%04x] ",
-      bta_dm_search_cb.state,
-      ((p1[0]) << 24) + ((p1[1]) << 16) + ((p1[2]) << 8) + (p1[3]),
-      ((p1[4]) << 8) + p1[5],
-      ((p2[0]) << 24) + ((p2[1]) << 16) + ((p2[2]) << 8) + (p2[3]),
-      ((p2[4]) << 8) + p2[5]);
+  VLOG(1) << "DM Search state= " << bta_dm_search_cb.state
+          << " search_cb.peer_dbaddr:" << bta_dm_search_cb.peer_bdaddr
+          << " connected_bda=" << p_data->remote_bda.address;
 
   APPL_TRACE_DEBUG("BTA_GATTC_OPEN_EVT conn_id = %d client_if=%d status = %d",
                    p_data->conn_id, p_data->client_if, p_data->status);
 
   bta_dm_search_cb.conn_id = p_data->conn_id;
 
-  if (p_data->status == BTA_GATT_OK) {
+  if (p_data->status == GATT_SUCCESS) {
     btm_dm_start_disc_gatt_services(p_data->conn_id);
   } else {
-    bta_dm_gatt_disc_complete(BTA_GATT_INVALID_CONN_ID, p_data->status);
+    bta_dm_gatt_disc_complete(GATT_INVALID_CONN_ID, p_data->status);
   }
 }
 
@@ -4715,10 +4687,9 @@ static void bta_dm_gattc_callback(tBTA_GATTC_EVT event, tBTA_GATTC* p_data) {
       /* in case of disconnect before search is completed */
       if ((bta_dm_search_cb.state != BTA_DM_SEARCH_IDLE) &&
           (bta_dm_search_cb.state != BTA_DM_SEARCH_ACTIVE) &&
-          !memcmp(p_data->close.remote_bda, bta_dm_search_cb.peer_bdaddr,
-                  BD_ADDR_LEN)) {
-        bta_dm_gatt_disc_complete((uint16_t)BTA_GATT_INVALID_CONN_ID,
-                                  (tBTA_GATT_STATUS)BTA_GATT_ERROR);
+          p_data->close.remote_bda == bta_dm_search_cb.peer_bdaddr) {
+        bta_dm_gatt_disc_complete((uint16_t)GATT_INVALID_CONN_ID,
+                                  (tGATT_STATUS)GATT_ERROR);
       }
       break;
 

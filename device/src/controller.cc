@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- *  Copyright (C) 2014 Google, Inc.
+ *  Copyright 2014 Google, Inc.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -31,7 +31,7 @@
 #include "stack/include/btm_ble_api.h"
 
 const bt_event_mask_t BLE_EVENT_MASK = {
-    {0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x16, 0x7f}};
+    {0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0x1E, 0x7f}};
 
 const bt_event_mask_t CLASSIC_EVENT_MASK = {HCI_DUMO_EVENT_MASK_EXT};
 
@@ -48,7 +48,7 @@ static const hci_t* hci;
 static const hci_packet_factory_t* packet_factory;
 static const hci_packet_parser_t* packet_parser;
 
-static bt_bdaddr_t address;
+static RawAddress address;
 static bt_version_t bt_version;
 
 static uint8_t supported_commands[HCI_SUPPORTED_COMMANDS_ARRAY_SIZE];
@@ -228,6 +228,9 @@ static future_t* start_up(void) {
           packet_factory->make_ble_read_number_of_supported_advertising_sets());
       packet_parser->parse_ble_read_number_of_supported_advertising_sets(
           response, &ble_number_of_supported_advertising_sets);
+    } else {
+      /* If LE Excended Advertising is not supported, use the default value */
+      ble_maxium_advertising_data_length = 31;
     }
 
     // Set the ble event mask next
@@ -271,7 +274,7 @@ EXPORT_SYMBOL extern const module_t controller_module = {
 
 static bool get_is_ready(void) { return readable; }
 
-static const bt_bdaddr_t* get_address(void) {
+static const RawAddress* get_address(void) {
   CHECK(readable);
   return &address;
 }
@@ -354,6 +357,16 @@ static bool supports_master_slave_role_switch(void) {
   return HCI_SWITCH_SUPPORTED(features_classic[0].as_array);
 }
 
+static bool supports_enhanced_setup_synchronous_connection(void) {
+  assert(readable);
+  return HCI_ENH_SETUP_SYNCH_CONN_SUPPORTED(supported_commands);
+}
+
+static bool supports_enhanced_accept_synchronous_connection(void) {
+  assert(readable);
+  return HCI_ENH_ACCEPT_SYNCH_CONN_SUPPORTED(supported_commands);
+}
+
 static bool supports_ble(void) {
   CHECK(readable);
   return ble_supported;
@@ -363,6 +376,13 @@ static bool supports_ble_privacy(void) {
   CHECK(readable);
   CHECK(ble_supported);
   return HCI_LE_ENHANCED_PRIVACY_SUPPORTED(features_ble.as_array);
+}
+
+static bool supports_ble_set_privacy_mode() {
+  CHECK(readable);
+  CHECK(ble_supported);
+  return HCI_LE_ENHANCED_PRIVACY_SUPPORTED(features_ble.as_array) &&
+         HCI_LE_SET_PRIVACY_MODE_SUPPORTED(supported_commands);
 }
 
 static bool supports_ble_packet_extension(void) {
@@ -375,6 +395,18 @@ static bool supports_ble_connection_parameters_request(void) {
   CHECK(readable);
   CHECK(ble_supported);
   return HCI_LE_CONN_PARAM_REQ_SUPPORTED(features_ble.as_array);
+}
+
+static bool supports_ble_2m_phy(void) {
+  CHECK(readable);
+  CHECK(ble_supported);
+  return HCI_LE_2M_PHY_SUPPORTED(features_ble.as_array);
+}
+
+static bool supports_ble_coded_phy(void) {
+  CHECK(readable);
+  CHECK(ble_supported);
+  return HCI_LE_CODED_PHY_SUPPORTED(features_ble.as_array);
 }
 
 static bool supports_ble_extended_advertising(void) {
@@ -461,6 +493,14 @@ static void set_ble_resolving_list_max_size(int resolving_list_max_size) {
   ble_resolving_list_max_size = resolving_list_max_size;
 }
 
+static uint8_t get_le_all_initiating_phys() {
+  uint8_t phy = PHY_LE_1M;
+  // TODO(jpawlowski): uncomment after next FW udpate
+  // if (supports_ble_2m_phy()) phy |= PHY_LE_2M;
+  // if (supports_ble_coded_phy()) phy |= PHY_LE_CODED;
+  return phy;
+}
+
 static const controller_t interface = {
     get_is_ready,
 
@@ -481,11 +521,16 @@ static const controller_t interface = {
     supports_rssi_with_inquiry_results,
     supports_extended_inquiry_response,
     supports_master_slave_role_switch,
+    supports_enhanced_setup_synchronous_connection,
+    supports_enhanced_accept_synchronous_connection,
 
     supports_ble,
     supports_ble_packet_extension,
     supports_ble_connection_parameters_request,
     supports_ble_privacy,
+    supports_ble_set_privacy_mode,
+    supports_ble_2m_phy,
+    supports_ble_coded_phy,
     supports_ble_extended_advertising,
     supports_ble_periodic_advertising,
 
@@ -505,7 +550,8 @@ static const controller_t interface = {
 
     get_ble_resolving_list_max_size,
     set_ble_resolving_list_max_size,
-    get_local_supported_codecs};
+    get_local_supported_codecs,
+    get_le_all_initiating_phys};
 
 const controller_t* controller_get_interface() {
   static bool loaded = false;

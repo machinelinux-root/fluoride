@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- *  Copyright (C) 2014 Google, Inc.
+ *  Copyright 2014 Google, Inc.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -64,6 +64,13 @@ void thread_stop(thread_t* thread);
 // The |thread| has to be running for this call to succeed.
 // Returns true on success.
 bool thread_set_priority(thread_t* thread, int priority);
+
+// Attempts to set |thread| to the real-time SCHED_FIFO |priority|.
+// The |thread| has to be running for this call to succeed.
+// Priority values are valid in the range sched_get_priority_max(SCHED_FIFO)
+// to sched_get_priority_min(SCHED_FIFO).  Larger values are higher priority.
+// Returns true on success.
+bool thread_set_rt_priority(thread_t* thread, int priority);
 
 // Returns true if the current thread is the same as the one represented by
 // |thread|.

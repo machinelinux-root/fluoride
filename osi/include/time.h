@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- *  Copyright (C) 2015 Google, Inc.
+ *  Copyright 2015 Google, Inc.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -37,3 +37,6 @@ uint32_t time_get_os_boottime_ms(void);
 
 // Get the OS boot time in microseconds.
 uint64_t time_get_os_boottime_us(void);
+
+// Get the current wall clock time in microseconds.
+uint64_t time_gettimeofday_us(void);

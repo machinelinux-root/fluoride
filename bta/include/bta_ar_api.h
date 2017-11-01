@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- *  Copyright (C) 2004-2012 Broadcom Corporation
+ *  Copyright 2004-2012 Broadcom Corporation
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -86,7 +86,7 @@ extern void bta_ar_dereg_avdt(tBTA_SYS_ID sys_id);
  * Returns          void
  *
  ******************************************************************************/
-extern void bta_ar_avdt_conn(tBTA_SYS_ID sys_id, BD_ADDR bd_addr);
+extern void bta_ar_avdt_conn(tBTA_SYS_ID sys_id, const RawAddress& bd_addr);
 
 /*******************************************************************************
  *

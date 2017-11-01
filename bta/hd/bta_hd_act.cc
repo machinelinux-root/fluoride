@@ -1,7 +1,7 @@
 /******************************************************************************
  *
- *  Copyright (C) 2016 The Android Open Source Project
- *  Copyright (C) 2005-2012 Broadcom Corporation
+ *  Copyright 2016 The Android Open Source Project
+ *  Copyright 2005-2012 Broadcom Corporation
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -38,8 +38,8 @@
 
 #include "osi/include/osi.h"
 
-static void bta_hd_cback(BD_ADDR bd_addr, uint8_t event, uint32_t data,
-                         BT_HDR* pdata);
+static void bta_hd_cback(const RawAddress& bd_addr, uint8_t event,
+                         uint32_t data, BT_HDR* pdata);
 
 static bool check_descriptor(uint8_t* data, uint16_t length,
                              bool* has_report_id) {
@@ -52,7 +52,11 @@ static bool check_descriptor(uint8_t* data, uint16_t length,
 
     switch (item) {
       case 0xfe:  // long item indicator
-        ptr += ((*ptr) + 2);
+        if (ptr < data + length) {
+          ptr += ((*ptr) + 2);
+        } else {
+          return false;
+        }
         break;
 
       case 0x85:  // Report ID
@@ -91,14 +95,17 @@ void bta_hd_api_enable(tBTA_HD_DATA* p_data) {
   /* store parameters */
   bta_hd_cb.p_cback = p_data->api_enable.p_cback;
 
-  if ((ret = HID_DevRegister(bta_hd_cback)) == HID_SUCCESS) {
+  ret = HID_DevRegister(bta_hd_cback);
+  if (ret == HID_SUCCESS) {
     status = BTA_HD_OK;
   } else {
     APPL_TRACE_ERROR("%s: Failed to register HID device (%d)", __func__, ret);
   }
 
   /* signal BTA call back event */
-  (*bta_hd_cb.p_cback)(BTA_HD_ENABLE_EVT, (tBTA_HD*)&status);
+  tBTA_HD bta_hd;
+  bta_hd.status = status;
+  (*bta_hd_cb.p_cback)(BTA_HD_ENABLE_EVT, &bta_hd);
 }
 
 /*******************************************************************************
@@ -126,13 +133,16 @@ void bta_hd_api_disable(void) {
   }
 
   /* Deregister with lower layer */
-  if ((ret = HID_DevDeregister()) == HID_SUCCESS) {
+  ret = HID_DevDeregister();
+  if (ret == HID_SUCCESS) {
     status = BTA_HD_OK;
   } else {
     APPL_TRACE_ERROR("%s: Failed to deregister HID device (%s)", __func__, ret);
   }
 
-  (*bta_hd_cb.p_cback)(BTA_HD_DISABLE_EVT, (tBTA_HD*)&status);
+  tBTA_HD bta_hd;
+  bta_hd.status = status;
+  (*bta_hd_cb.p_cback)(BTA_HD_DISABLE_EVT, &bta_hd);
 
   memset(&bta_hd_cb, 0, sizeof(tBTA_HD_CB));
 }
@@ -149,13 +159,19 @@ void bta_hd_api_disable(void) {
 void bta_hd_register_act(tBTA_HD_DATA* p_data) {
   tBTA_HD ret;
   tBTA_HD_REGISTER_APP* p_app_data = (tBTA_HD_REGISTER_APP*)p_data;
+  bool use_report_id = FALSE;
 
   APPL_TRACE_API("%s", __func__);
 
   ret.reg_status.in_use = FALSE;
 
-  /* Check if len doesn't exceed BTA_HD_APP_DESCRIPTOR_LEN */
-  if (p_app_data->d_len > BTA_HD_APP_DESCRIPTOR_LEN) {
+  /* Check if len doesn't exceed BTA_HD_APP_DESCRIPTOR_LEN and descriptor
+   * itself is well-formed. Also check if descriptor has Report Id item so we
+   * know if report will have prefix or not. */
+  if (p_app_data->d_len > BTA_HD_APP_DESCRIPTOR_LEN ||
+      !check_descriptor(p_app_data->d_data, p_app_data->d_len,
+                        &use_report_id)) {
+    APPL_TRACE_ERROR("%s: Descriptor is too long or malformed", __func__);
     ret.reg_status.status = BTA_HD_ERROR;
     (*bta_hd_cb.p_cback)(BTA_HD_REGISTER_APP_EVT, &ret);
     return;
@@ -168,11 +184,7 @@ void bta_hd_register_act(tBTA_HD_DATA* p_data) {
     SDP_DeleteRecord(bta_hd_cb.sdp_handle);
   }
 
-  // need to check if descriptor has Report Id item so we know if report will
-  // have prefix or not
-  check_descriptor(p_app_data->d_data, p_app_data->d_len,
-                   &bta_hd_cb.use_report_id);
-
+  bta_hd_cb.use_report_id = use_report_id;
   bta_hd_cb.sdp_handle = SDP_CreateRecord();
   HID_DevAddRecord(bta_hd_cb.sdp_handle, p_app_data->name,
                    p_app_data->description, p_app_data->provider,
@@ -223,7 +235,9 @@ void bta_hd_unregister_act(UNUSED_ATTR tBTA_HD_DATA* p_data) {
   bta_hd_cb.sdp_handle = 0;
   bta_sys_remove_uuid(UUID_SERVCLASS_HUMAN_INTERFACE);
 
-  (*bta_hd_cb.p_cback)(BTA_HD_UNREGISTER_APP_EVT, (tBTA_HD*)&status);
+  tBTA_HD bta_hd;
+  bta_hd.status = status;
+  (*bta_hd_cb.p_cback)(BTA_HD_UNREGISTER_APP_EVT, &bta_hd);
 }
 
 /*******************************************************************************
@@ -277,7 +291,7 @@ extern void bta_hd_connect_act(tBTA_HD_DATA* p_data) {
     return;
   }
 
-  bdcpy(cback_data.conn.bda, p_ctrl->addr);
+  cback_data.conn.bda = p_ctrl->addr;
   cback_data.conn.status = BTHD_CONN_STATE_CONNECTING;
 
   bta_hd_cb.p_cback(BTA_HD_CONN_STATE_EVT, &cback_data);
@@ -305,10 +319,10 @@ extern void bta_hd_disconnect_act(UNUSED_ATTR tBTA_HD_DATA* p_data) {
     return;
   }
 
-  bdcpy(cback_data.conn.bda, bta_hd_cb.bd_addr);
-  cback_data.conn.status = BTHD_CONN_STATE_DISCONNECTING;
-
-  bta_hd_cb.p_cback(BTA_HD_CONN_STATE_EVT, &cback_data);
+  if (HID_DevGetDevice(&cback_data.conn.bda) == HID_SUCCESS) {
+    cback_data.conn.status = BTHD_CONN_STATE_DISCONNECTING;
+    bta_hd_cb.p_cback(BTA_HD_CONN_STATE_EVT, &cback_data);
+  }
 }
 
 /*******************************************************************************
@@ -441,8 +455,8 @@ extern void bta_hd_open_act(tBTA_HD_DATA* p_data) {
   HID_DevPlugDevice(p_cback->addr);
   bta_sys_conn_open(BTA_ID_HD, 1, p_cback->addr);
 
-  bdcpy(cback_data.conn.bda, p_cback->addr);
-  bdcpy(bta_hd_cb.bd_addr, p_cback->addr);
+  cback_data.conn.bda = p_cback->addr;
+  bta_hd_cb.bd_addr = p_cback->addr;
 
   bta_hd_cb.p_cback(BTA_HD_OPEN_EVT, &cback_data);
 }
@@ -471,8 +485,8 @@ extern void bta_hd_close_act(tBTA_HD_DATA* p_data) {
     cback_event = BTA_HD_VC_UNPLUG_EVT;
   }
 
-  bdcpy(cback_data.conn.bda, p_cback->addr);
-  memset(bta_hd_cb.bd_addr, 0, sizeof(BD_ADDR));
+  cback_data.conn.bda = p_cback->addr;
+  bta_hd_cb.bd_addr = RawAddress::kEmpty;
 
   bta_hd_cb.p_cback(cback_event, &cback_data);
 }
@@ -507,7 +521,9 @@ extern void bta_hd_intr_data_act(tBTA_HD_DATA* p_data) {
   ret.len = len;
   ret.p_data = p_buf;
 
-  (*bta_hd_cb.p_cback)(BTA_HD_INTR_DATA_EVT, (tBTA_HD*)&ret);
+  tBTA_HD bta_hd;
+  bta_hd.intr_data = ret;
+  (*bta_hd_cb.p_cback)(BTA_HD_INTR_DATA_EVT, &bta_hd);
 }
 
 /*******************************************************************************
@@ -540,7 +556,9 @@ extern void bta_hd_get_report_act(tBTA_HD_DATA* p_data) {
     ret.buffer_size = *p_buf | (*(p_buf + 1) << 8);
   }
 
-  (*bta_hd_cb.p_cback)(BTA_HD_GET_REPORT_EVT, (tBTA_HD*)&ret);
+  tBTA_HD bta_hd;
+  bta_hd.get_report = ret;
+  (*bta_hd_cb.p_cback)(BTA_HD_GET_REPORT_EVT, &bta_hd);
 }
 
 /*******************************************************************************
@@ -577,7 +595,9 @@ extern void bta_hd_set_report_act(tBTA_HD_DATA* p_data) {
   ret.len = len;
   ret.p_data = p_buf;
 
-  (*bta_hd_cb.p_cback)(BTA_HD_SET_REPORT_EVT, (tBTA_HD*)&ret);
+  tBTA_HD bta_hd;
+  bta_hd.set_report = ret;
+  (*bta_hd_cb.p_cback)(BTA_HD_SET_REPORT_EVT, &bta_hd);
 }
 
 /*******************************************************************************
@@ -620,8 +640,8 @@ extern void bta_hd_vc_unplug_done_act(tBTA_HD_DATA* p_data) {
 
   HID_DevUnplugDevice(p_cback->addr);
 
-  bdcpy(cback_data.conn.bda, p_cback->addr);
-  bdcpy(bta_hd_cb.bd_addr, p_cback->addr);
+  cback_data.conn.bda = p_cback->addr;
+  bta_hd_cb.bd_addr = p_cback->addr;
 
   (*bta_hd_cb.p_cback)(BTA_HD_VC_UNPLUG_EVT, &cback_data);
 }
@@ -670,8 +690,8 @@ extern void bta_hd_exit_suspend_act(tBTA_HD_DATA* p_data) {
  * Returns          void
  *
  ******************************************************************************/
-static void bta_hd_cback(BD_ADDR bd_addr, uint8_t event, uint32_t data,
-                         BT_HDR* pdata) {
+static void bta_hd_cback(const RawAddress& bd_addr, uint8_t event,
+                         uint32_t data, BT_HDR* pdata) {
   tBTA_HD_CBACK_DATA* p_buf = NULL;
   uint16_t sm_event = BTA_HD_INVALID_EVT;
 
@@ -719,7 +739,7 @@ static void bta_hd_cback(BD_ADDR bd_addr, uint8_t event, uint32_t data,
       (p_buf = (tBTA_HD_CBACK_DATA*)osi_malloc(sizeof(tBTA_HD_CBACK_DATA) +
                                                sizeof(BT_HDR))) != NULL) {
     p_buf->hdr.event = sm_event;
-    bdcpy(p_buf->addr, bd_addr);
+    p_buf->addr = bd_addr;
     p_buf->data = data;
     p_buf->p_data = pdata;
 

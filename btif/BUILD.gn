@@ -1,5 +1,5 @@
 #
-#  Copyright (C) 2015 Google, Inc.
+#  Copyright 2015 Google, Inc.
 #
 #  Licensed under the Apache License, Version 2.0 (the "License");
 #  you may not use this file except in compliance with the License.
@@ -16,7 +16,7 @@
 
 static_library("btif") {
   sources = [
-    "//audio_a2dp_hw/audio_a2dp_hw_utils.cc",
+    "//audio_a2dp_hw/src/audio_a2dp_hw_utils.cc",
     "src/btif_a2dp.cc",
     "src/btif_a2dp_control.cc",
     "src/btif_a2dp_sink.cc",
@@ -78,10 +78,11 @@ static_library("btif") {
   include_dirs = [
     "include",
     "//",
-    "//audio_a2dp_hw",
+    "//audio_a2dp_hw/include",
     "//bta/include",
     "//bta/sys",
     "//btcore/include",
+    "//device/include",
     "//embdrv/sbc/encoder/include",
     "//embdrv/sbc/decoder/include",
     "//hci/include",
@@ -89,7 +90,7 @@ static_library("btif") {
     "//stack/btm",
     "//stack/include",
     "//third_party/tinyxml2",
-    "//include",
+    "//internal_include",
     "//udrv/include",
     "//utils/include",
     "//vnd/include",

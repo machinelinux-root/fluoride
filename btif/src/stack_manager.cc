@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- *  Copyright (C) 2014 Google, Inc.
+ *  Copyright 2014 Google, Inc.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -177,10 +177,10 @@ static void event_shut_down_stack(UNUSED_ATTR void* context) {
                                                     // puts it in a restartable
                                                     // state
 
-  LOG_INFO(LOG_TAG, "%s finished", __func__);
   hack_future = future_new();
   btif_thread_post(event_signal_stack_down, NULL);
   future_await(hack_future);
+  LOG_INFO(LOG_TAG, "%s finished", __func__);
 }
 
 static void ensure_stack_is_not_running(void) {

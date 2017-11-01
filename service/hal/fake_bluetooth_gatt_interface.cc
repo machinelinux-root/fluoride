@@ -1,5 +1,5 @@
 //
-//  Copyright (C) 2015 Google, Inc.
+//  Copyright 2015 Google, Inc.
 //
 //  Licensed under the Apache License, Version 2.0 (the "License");
 //  you may not use this file except in compliance with the License.
@@ -28,7 +28,7 @@ std::shared_ptr<BleScannerInterface> g_scanner_handler;
 std::shared_ptr<FakeBluetoothGattInterface::TestClientHandler> g_client_handler;
 std::shared_ptr<FakeBluetoothGattInterface::TestServerHandler> g_server_handler;
 
-bt_status_t FakeRegisterClient(bt_uuid_t* app_uuid) {
+bt_status_t FakeRegisterClient(const bluetooth::Uuid& app_uuid) {
   if (g_client_handler) return g_client_handler->RegisterClient(app_uuid);
 
   return BT_STATUS_FAIL;
@@ -40,15 +40,16 @@ bt_status_t FakeUnregisterClient(int client_if) {
   return BT_STATUS_FAIL;
 }
 
-bt_status_t FakeConnect(int client_if, const bt_bdaddr_t* bd_addr,
-                        bool is_direct, int transport) {
+bt_status_t FakeConnect(int client_if, const RawAddress& bd_addr,
+                        bool is_direct, int transport, bool opportunistic,
+                        int phy) {
   if (g_client_handler)
     return g_client_handler->Connect(client_if, bd_addr, is_direct, transport);
 
   return BT_STATUS_FAIL;
 }
 
-bt_status_t FakeDisconnect(int client_if, const bt_bdaddr_t* bd_addr,
+bt_status_t FakeDisconnect(int client_if, const RawAddress& bd_addr,
                            int conn_id) {
   if (g_client_handler)
     return g_client_handler->Disconnect(client_if, bd_addr, conn_id);
@@ -56,7 +57,7 @@ bt_status_t FakeDisconnect(int client_if, const bt_bdaddr_t* bd_addr,
   return BT_STATUS_FAIL;
 }
 
-bt_status_t FakeRegisterServer(bt_uuid_t* app_uuid) {
+bt_status_t FakeRegisterServer(const bluetooth::Uuid& app_uuid) {
   if (g_server_handler) return g_server_handler->RegisterServer(app_uuid);
 
   return BT_STATUS_FAIL;
@@ -93,7 +94,7 @@ bt_status_t FakeSendIndication(int server_if, int attribute_handle, int conn_id,
 }
 
 bt_status_t FakeSendResponse(int conn_id, int trans_id, int status,
-                             btgatt_response_t* response) {
+                             const btgatt_response_t& response) {
   if (g_server_handler)
     return g_server_handler->SendResponse(conn_id, trans_id, status, response);
 
@@ -107,7 +108,9 @@ btgatt_client_interface_t fake_btgattc_iface = {
     FakeDisconnect,
     nullptr,  // refresh
     nullptr,  // search_service
+    nullptr,  // discover_service_by_uuid
     nullptr,  // read_characteristic
+    nullptr,  // read_using_characteristic_uuid
     nullptr,  // write_characteristic
     nullptr,  // read_descriptor
     nullptr,  // write_descriptor
@@ -118,6 +121,8 @@ btgatt_client_interface_t fake_btgattc_iface = {
     nullptr,  // get_device_type
     nullptr,  // configure_mtu
     nullptr,  // conn_parameter_update
+    nullptr,  // set_phy
+    nullptr,  // read_phy
     nullptr,  // test_command
     nullptr,  // get_gatt_db
 };
@@ -132,6 +137,8 @@ btgatt_server_interface_t fake_btgatts_iface = {
     FakeDeleteService,
     FakeSendIndication,
     FakeSendResponse,
+    nullptr,  // set_phy
+    nullptr,  // read_phy
 };
 
 }  // namespace
@@ -170,38 +177,38 @@ FakeBluetoothGattInterface::~FakeBluetoothGattInterface() {
 // The methods below can be used to notify observers with certain events and
 // given parameters.
 void FakeBluetoothGattInterface::NotifyScanResultCallback(
-    const bt_bdaddr_t& bda, int rssi, std::vector<uint8_t> adv_data) {
+    const RawAddress& bda, int rssi, std::vector<uint8_t> adv_data) {
   FOR_EACH_OBSERVER(ScannerObserver, scanner_observers_,
                     ScanResultCallback(this, bda, rssi, adv_data));
 }
 
 void FakeBluetoothGattInterface::NotifyRegisterClientCallback(
-    int status, int client_if, const bt_uuid_t& app_uuid) {
+    int status, int client_if, const bluetooth::Uuid& app_uuid) {
   FOR_EACH_OBSERVER(ClientObserver, client_observers_,
                     RegisterClientCallback(this, status, client_if, app_uuid));
 }
 
 void FakeBluetoothGattInterface::NotifyConnectCallback(int conn_id, int status,
                                                        int client_if,
-                                                       const bt_bdaddr_t& bda) {
+                                                       const RawAddress& bda) {
   FOR_EACH_OBSERVER(ClientObserver, client_observers_,
                     ConnectCallback(this, conn_id, status, client_if, bda));
 }
 
 void FakeBluetoothGattInterface::NotifyDisconnectCallback(
-    int conn_id, int status, int client_if, const bt_bdaddr_t& bda) {
+    int conn_id, int status, int client_if, const RawAddress& bda) {
   FOR_EACH_OBSERVER(ClientObserver, client_observers_,
                     DisconnectCallback(this, conn_id, status, client_if, bda));
 }
 
 void FakeBluetoothGattInterface::NotifyRegisterServerCallback(
-    int status, int server_if, const bt_uuid_t& app_uuid) {
+    int status, int server_if, const Uuid& app_uuid) {
   FOR_EACH_OBSERVER(ServerObserver, server_observers_,
                     RegisterServerCallback(this, status, server_if, app_uuid));
 }
 
 void FakeBluetoothGattInterface::NotifyServerConnectionCallback(
-    int conn_id, int server_if, int connected, const bt_bdaddr_t& bda) {
+    int conn_id, int server_if, int connected, const RawAddress& bda) {
   FOR_EACH_OBSERVER(
       ServerObserver, server_observers_,
       ConnectionCallback(this, conn_id, server_if, connected, bda));
@@ -214,7 +221,7 @@ void FakeBluetoothGattInterface::NotifyServiceAddedCallback(
 }
 
 void FakeBluetoothGattInterface::NotifyRequestReadCharacteristicCallback(
-    int conn_id, int trans_id, const bt_bdaddr_t& bda, int attr_handle,
+    int conn_id, int trans_id, const RawAddress& bda, int attr_handle,
     int offset, bool is_long) {
   FOR_EACH_OBSERVER(
       ServerObserver, server_observers_,
@@ -223,7 +230,7 @@ void FakeBluetoothGattInterface::NotifyRequestReadCharacteristicCallback(
 }
 
 void FakeBluetoothGattInterface::NotifyRequestReadDescriptorCallback(
-    int conn_id, int trans_id, const bt_bdaddr_t& bda, int attr_handle,
+    int conn_id, int trans_id, const RawAddress& bda, int attr_handle,
     int offset, bool is_long) {
   FOR_EACH_OBSERVER(
       ServerObserver, server_observers_,
@@ -232,7 +239,7 @@ void FakeBluetoothGattInterface::NotifyRequestReadDescriptorCallback(
 }
 
 void FakeBluetoothGattInterface::NotifyRequestWriteCharacteristicCallback(
-    int conn_id, int trans_id, const bt_bdaddr_t& bda, int attr_handle,
+    int conn_id, int trans_id, const RawAddress& bda, int attr_handle,
     int offset, bool need_rsp, bool is_prep, std::vector<uint8_t> value) {
   FOR_EACH_OBSERVER(ServerObserver, server_observers_,
                     RequestWriteCharacteristicCallback(
@@ -241,7 +248,7 @@ void FakeBluetoothGattInterface::NotifyRequestWriteCharacteristicCallback(
 }
 
 void FakeBluetoothGattInterface::NotifyRequestWriteDescriptorCallback(
-    int conn_id, int trans_id, const bt_bdaddr_t& bda, int attr_handle,
+    int conn_id, int trans_id, const RawAddress& bda, int attr_handle,
     int offset, bool need_rsp, bool is_prep, std::vector<uint8_t> value) {
   FOR_EACH_OBSERVER(
       ServerObserver, server_observers_,
@@ -250,7 +257,7 @@ void FakeBluetoothGattInterface::NotifyRequestWriteDescriptorCallback(
 }
 
 void FakeBluetoothGattInterface::NotifyRequestExecWriteCallback(
-    int conn_id, int trans_id, const bt_bdaddr_t& bda, int exec_write) {
+    int conn_id, int trans_id, const RawAddress& bda, int exec_write) {
   FOR_EACH_OBSERVER(
       ServerObserver, server_observers_,
       RequestExecWriteCallback(this, conn_id, trans_id, bda, exec_write));

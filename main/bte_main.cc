@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- *  Copyright (C) 2009-2012 Broadcom Corporation
+ *  Copyright 2009-2012 Broadcom Corporation
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -27,6 +27,7 @@
 #define LOG_TAG "bt_main"
 
 #include <base/logging.h>
+#include <base/threading/thread.h>
 #include <fcntl.h>
 #include <pthread.h>
 #include <signal.h>
@@ -79,13 +80,35 @@
 static const hci_t* hci;
 
 /*******************************************************************************
+ *  Externs
+ ******************************************************************************/
+extern void btu_hci_msg_process(BT_HDR* p_msg);
+
+/*******************************************************************************
  *  Static functions
  ******************************************************************************/
 
-/*******************************************************************************
- *  Externs
- ******************************************************************************/
-fixed_queue_t* btu_hci_msg_queue;
+/******************************************************************************
+ *
+ * Function         post_to_hci_message_loop
+ *
+ * Description      Post an HCI event to the hci message queue
+ *
+ * Returns          None
+ *
+ *****************************************************************************/
+void post_to_hci_message_loop(const tracked_objects::Location& from_here,
+                              BT_HDR* p_msg) {
+  base::MessageLoop* hci_message_loop = get_message_loop();
+  if (!hci_message_loop || !hci_message_loop->task_runner().get()) {
+    LOG_ERROR(LOG_TAG, "%s: HCI message loop not running, accessed from %s",
+              __func__, from_here.ToString().c_str());
+    return;
+  }
+
+  hci_message_loop->task_runner()->PostTask(
+      from_here, base::Bind(&btu_hci_msg_process, p_msg));
+}
 
 /******************************************************************************
  *
@@ -100,17 +123,12 @@ void bte_main_boot_entry(void) {
   module_init(get_module(INTEROP_MODULE));
 
   hci = hci_layer_get_interface();
-  if (!hci)
+  if (!hci) {
     LOG_ERROR(LOG_TAG, "%s could not get hci layer interface.", __func__);
-
-  btu_hci_msg_queue = fixed_queue_new(SIZE_MAX);
-  if (btu_hci_msg_queue == NULL) {
-    LOG_ERROR(LOG_TAG, "%s unable to allocate hci message queue.", __func__);
     return;
   }
 
-  data_dispatcher_register_default(hci->event_dispatcher, btu_hci_msg_queue);
-  hci->set_data_queue(btu_hci_msg_queue);
+  hci->set_data_cb(base::Bind(&post_to_hci_message_loop));
 
   module_init(get_module(STACK_CONFIG_MODULE));
 }
@@ -125,13 +143,6 @@ void bte_main_boot_entry(void) {
  *
  *****************************************************************************/
 void bte_main_cleanup() {
-  data_dispatcher_register_default(hci_layer_get_interface()->event_dispatcher,
-                                   NULL);
-  hci->set_data_queue(NULL);
-  fixed_queue_free(btu_hci_msg_queue, NULL);
-
-  btu_hci_msg_queue = NULL;
-
   module_clean_up(get_module(STACK_CONFIG_MODULE));
 
   module_clean_up(get_module(INTEROP_MODULE));
@@ -184,48 +195,9 @@ void bte_main_disable(void) {
  * Returns          None
  *
  *****************************************************************************/
-void bte_main_postload_cfg(void) { hci->do_postload(); }
-
-#if (HCILP_INCLUDED == TRUE)
-/******************************************************************************
- *
- * Function         bte_main_enable_lpm
- *
- * Description      BTE MAIN API - Enable/Disable low power mode operation
- *
- * Returns          None
- *
- *****************************************************************************/
-void bte_main_enable_lpm(bool enable) {
-  hci->send_low_power_command(enable ? LPM_ENABLE : LPM_DISABLE);
+void bte_main_postload_cfg(void) {
+  // TODO(eisenbach): [HIDL] DEPRECATE?
 }
-
-/******************************************************************************
- *
- * Function         bte_main_lpm_allow_bt_device_sleep
- *
- * Description      BTE MAIN API - Allow the BT controller to go to sleep
- *
- * Returns          None
- *
- *****************************************************************************/
-void bte_main_lpm_allow_bt_device_sleep() {
-  hci->send_low_power_command(LPM_WAKE_DEASSERT);
-}
-
-/******************************************************************************
- *
- * Function         bte_main_lpm_wake_bt_device
- *
- * Description      BTE MAIN API - Wake BT controller up if it is in sleep mode
- *
- * Returns          None
- *
- *****************************************************************************/
-void bte_main_lpm_wake_bt_device() {
-  hci->send_low_power_command(LPM_WAKE_ASSERT);
-}
-#endif  // HCILP_INCLUDED
 
 /******************************************************************************
  *

@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- *  Copyright (C) 2009-2012 Broadcom Corporation
+ *  Copyright 2009-2012 Broadcom Corporation
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -47,6 +47,7 @@
 #include <unistd.h>
 
 #include <mutex>
+#include <string>
 
 #include "bta_api.h"
 #include "btif_common.h"
@@ -60,18 +61,6 @@
     if (!(s))                                                                \
       APPL_TRACE_ERROR("## %s assert %s failed at line:%d ##", __func__, #s, \
                        __LINE__)                                             \
-  } while (0)
-
-#define print_events(events)                                  \
-  do {                                                        \
-    APPL_TRACE_DEBUG("print poll event:%x", (events));        \
-    if ((events)&POLLIN) APPL_TRACE_DEBUG("   POLLIN ");      \
-    if ((events)&POLLPRI) APPL_TRACE_DEBUG("   POLLPRI ");    \
-    if ((events)&POLLOUT) APPL_TRACE_DEBUG("   POLLOUT ");    \
-    if ((events)&POLLERR) APPL_TRACE_DEBUG("   POLLERR ");    \
-    if ((events)&POLLHUP) APPL_TRACE_DEBUG("   POLLHUP ");    \
-    if ((events)&POLLNVAL) APPL_TRACE_DEBUG("   POLLNVAL ");  \
-    if ((events)&POLLRDHUP) APPL_TRACE_DEBUG("   POLLRDHUP"); \
   } while (0)
 
 #define MAX_THREAD 8
@@ -98,7 +87,7 @@ typedef struct {
   int poll_count;
   poll_slot_t ps[MAX_POLL];
   int psi[MAX_POLL];  // index of poll slot
-  volatile pthread_t thread_id;
+  pthread_t thread_id;
   btsock_signaled_cb callback;
   btsock_cmd_cb cmd_callback;
   int used;
@@ -328,7 +317,7 @@ int btsock_thread_wakeup(int h) {
 }
 int btsock_thread_exit(int h) {
   if (h < 0 || h >= MAX_THREAD) {
-    APPL_TRACE_ERROR("invalid bt thread handle:%d", h);
+    APPL_TRACE_ERROR("invalid bt thread slot:%d", h);
     return false;
   }
   if (ts[h].cmd_fdw == -1) {
@@ -341,7 +330,10 @@ int btsock_thread_exit(int h) {
   OSI_NO_INTR(ret = send(ts[h].cmd_fdw, &cmd, sizeof(cmd), 0));
 
   if (ret == sizeof(cmd)) {
-    pthread_join(ts[h].thread_id, 0);
+    if (ts[h].thread_id != -1) {
+      pthread_join(ts[h].thread_id, 0);
+      ts[h].thread_id = -1;
+    }
     free_thread_slot(h);
     return true;
   }
@@ -458,6 +450,19 @@ static int process_cmd_sock(int h) {
   }
   return true;
 }
+
+static void print_events(short events) {
+  std::string flags("");
+  if ((events)&POLLIN) flags += " POLLIN";
+  if ((events)&POLLPRI) flags += " POLLPRI";
+  if ((events)&POLLOUT) flags += " POLLOUT";
+  if ((events)&POLLERR) flags += " POLLERR";
+  if ((events)&POLLHUP) flags += " POLLHUP ";
+  if ((events)&POLLNVAL) flags += " POLLNVAL";
+  if ((events)&POLLRDHUP) flags += " POLLRDHUP";
+  APPL_TRACE_DEBUG("print poll event:%x = %s", (events), flags.c_str());
+}
+
 static void process_data_sock(int h, struct pollfd* pfds, int count) {
   asrt(count <= ts[h].poll_count);
   int i;
@@ -542,7 +547,6 @@ static void* sock_poll_thread(void* arg) {
       APPL_TRACE_DEBUG("no data, select ret: %d", ret)
     };
   }
-  ts[h].thread_id = -1;
   APPL_TRACE_DEBUG("socket poll thread exiting, h:%d", h);
   return 0;
 }

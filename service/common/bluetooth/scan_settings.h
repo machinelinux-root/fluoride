@@ -1,5 +1,5 @@
 //
-//  Copyright (C) 2015 Google, Inc.
+//  Copyright 2015 Google, Inc.
 //
 //  Licensed under the Apache License, Version 2.0 (the "License");
 //  you may not use this file except in compliance with the License.
@@ -116,7 +116,7 @@ class ScanSettings {
   ScanSettings(Mode mode, CallbackTypeBitField callback_type,
                ResultType result_type, base::TimeDelta report_delay_ms,
                MatchMode match_mode, MatchCount match_count_per_filter);
-  ~ScanSettings() = default;
+  virtual ~ScanSettings() = default;
 
   // Returns the scan mode.
   Mode mode() const { return mode_; }

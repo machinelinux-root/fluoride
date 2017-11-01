@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- *  Copyright (C) 2001-2012 Broadcom Corporation
+ *  Copyright 2001-2012 Broadcom Corporation
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -32,7 +32,6 @@
 #include "bte.h"
 #include "btm_api.h"
 #include "btu.h"
-#include "gap_api.h"
 #include "l2c_api.h"
 #include "main_int.h"
 #include "osi/include/config.h"
@@ -60,7 +59,6 @@
 #include "hidd_api.h"
 #endif
 
-#include "gatt_api.h"
 #include "smp_api.h"
 
 #ifndef DEFAULT_CONF_TRACE_LEVEL
@@ -123,15 +121,11 @@ static tBTTRC_FUNC_MAP bttrc_set_level_map[] = {
     {BTTRC_ID_STK_HID, BTTRC_ID_STK_HID, HID_HostSetTraceLevel, "TRC_HID_HOST",
      DEFAULT_CONF_TRACE_LEVEL},
 #endif
-    {BTTRC_ID_STK_GAP, BTTRC_ID_STK_GAP, GAP_SetTraceLevel, "TRC_GAP",
-     DEFAULT_CONF_TRACE_LEVEL},
 #if (PAN_INCLUDED == TRUE)
     {BTTRC_ID_STK_PAN, BTTRC_ID_STK_PAN, PAN_SetTraceLevel, "TRC_PAN",
      DEFAULT_CONF_TRACE_LEVEL},
 #endif
     {BTTRC_ID_STK_SDP, BTTRC_ID_STK_SDP, SDP_SetTraceLevel, "TRC_SDP",
-     DEFAULT_CONF_TRACE_LEVEL},
-    {BTTRC_ID_STK_GATT, BTTRC_ID_STK_GATT, GATT_SetTraceLevel, "TRC_GATT",
      DEFAULT_CONF_TRACE_LEVEL},
     {BTTRC_ID_STK_SMP, BTTRC_ID_STK_SMP, SMP_SetTraceLevel, "TRC_SMP",
      DEFAULT_CONF_TRACE_LEVEL},
@@ -175,7 +169,8 @@ void LogMsg(uint32_t trace_set_mask, const char* fmt_str, ...) {
       break;
     default:
       /* we should never get this */
-      LOG_ERROR(bt_layer_tags[trace_layer], "%s", buffer);
+      LOG_ERROR(bt_layer_tags[trace_layer], "!BAD TRACE TYPE! %s", buffer);
+      CHECK(TRACE_GET_TYPE(trace_set_mask) == TRACE_TYPE_ERROR);
       break;
   }
 }
@@ -204,9 +199,8 @@ static void load_levels_from_config(const config_t* config) {
 
   for (tBTTRC_FUNC_MAP* functions = &bttrc_set_level_map[0];
        functions->trc_name; ++functions) {
-    LOG_INFO(LOG_TAG, "BTE_InitTraceLevels -- %s", functions->trc_name);
-    int value =
-        config_get_int(config, CONFIG_DEFAULT_SECTION, functions->trc_name, -1);
+    int value = config_get_int(*config, CONFIG_DEFAULT_SECTION,
+                               functions->trc_name, -1);
     if (value != -1) functions->trace_level = value;
 
     if (functions->p_f) functions->p_f(functions->trace_level);

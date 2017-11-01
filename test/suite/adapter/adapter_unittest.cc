@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- *  Copyright (C) 2015 Google, Inc.
+ *  Copyright 2015 Google, Inc.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -82,7 +82,8 @@ TEST_F(BluetoothTest, AdapterSetGetName) {
     property_free(new_name);
     new_name = property_new_name("BluetoothTestName2");
   }
-  std::string old_name((const char*)property_as_name(name_property)->name);
+  std::string old_name((const char*)property_as_name(name_property)->name,
+                       name_property->len);
 
   EXPECT_EQ(bt_interface()->set_adapter_property(new_name), BT_STATUS_SUCCESS);
   semaphore_wait(adapter_properties_callback_sem_);
@@ -151,7 +152,7 @@ TEST_F(BluetoothTest, AdapterDisableDuringBonding) {
   EXPECT_EQ(GetState(), BT_STATE_OFF)
       << "Test should be run with Adapter disabled";
 
-  bt_bdaddr_t bdaddr = {{0x22, 0x22, 0x22, 0x22, 0x22, 0x22}};
+  RawAddress bdaddr = {{0x22, 0x22, 0x22, 0x22, 0x22, 0x22}};
 
   for (int i = 0; i < kTestRepeatCount; ++i) {
     EXPECT_EQ(bt_interface()->enable(false), BT_STATUS_SUCCESS);
@@ -166,6 +167,29 @@ TEST_F(BluetoothTest, AdapterDisableDuringBonding) {
     EXPECT_EQ(bt_interface()->disable(), BT_STATUS_SUCCESS);
     semaphore_wait(adapter_state_changed_callback_sem_);
     EXPECT_EQ(GetState(), BT_STATE_OFF) << "Adapter did not turn off.";
+  }
+}
+
+TEST_F(BluetoothTest, AdapterCleanupDuringDiscovery) {
+  EXPECT_EQ(GetState(), BT_STATE_OFF)
+      << "Test should be run with Adapter disabled";
+
+  bt_callbacks_t* bt_callbacks =
+      bluetooth::hal::BluetoothInterface::Get()->GetHALCallbacks();
+  ASSERT_TRUE(bt_callbacks != nullptr);
+
+  for (int i = 0; i < kTestRepeatCount; ++i) {
+    bt_interface()->init(bt_callbacks);
+    EXPECT_EQ(bt_interface()->enable(false), BT_STATUS_SUCCESS);
+    semaphore_wait(adapter_state_changed_callback_sem_);
+    EXPECT_EQ(GetState(), BT_STATE_ON) << "Adapter did not turn on.";
+
+    EXPECT_EQ(bt_interface()->start_discovery(), BT_STATUS_SUCCESS);
+
+    EXPECT_EQ(bt_interface()->disable(), BT_STATUS_SUCCESS);
+    semaphore_wait(adapter_state_changed_callback_sem_);
+    EXPECT_EQ(GetState(), BT_STATE_OFF) << "Adapter did not turn off.";
+    bt_interface()->cleanup();
   }
 }
 

@@ -1,5 +1,5 @@
 #
-#  Copyright (C) 2015 Google, Inc.
+#  Copyright 2015 Google, Inc.
 #
 #  Licensed under the Apache License, Version 2.0 (the "License");
 #  you may not use this file except in compliance with the License.
@@ -20,23 +20,18 @@ static_library("hci") {
     "src/btsnoop_mem.cc",
     "src/btsnoop_net.cc",
     "src/buffer_allocator.cc",
-    "src/hci_audio.cc",
-    "src/hci_hal.cc",
-    "src/hci_hal_h4.cc",
-    "src/hci_hal_mct.cc",
     "src/hci_inject.cc",
     "src/hci_layer.cc",
+    "src/hci_layer_linux.cc",
     "src/hci_packet_factory.cc",
     "src/hci_packet_parser.cc",
-    "src/low_power_manager.cc",
     "src/packet_fragmenter.cc",
-    "src/vendor.cc",
   ]
 
   include_dirs = [
     "include",
     "//",
-    "//include",
+    "//internal_include",
     "//bta/include",
     "//btcore/include",
     "//stack/include",
@@ -52,16 +47,12 @@ executable("net_test_hci") {
   sources = [
     "//osi/test/AllocationTestHarness.cc",
     "//osi/test/AlarmTestHarness.cc",
-    "test/hci_hal_h4_test.cc",
-    "test/hci_hal_mct_test.cc",
-    "test/hci_layer_test.cc",
-    "test/low_power_manager_test.cc",
     "test/packet_fragmenter_test.cc",
   ]
 
   include_dirs = [
     "//",
-    "//include",
+    "//internal_include",
     "//btcore/include",
     "//hci/include",
     "//osi/test",

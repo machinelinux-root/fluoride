@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- *  Copyright (C) 2002-2012 Broadcom Corporation
+ *  Copyright 2002-2012 Broadcom Corporation
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -400,7 +400,7 @@ typedef union {
 
 /* channel control block type */
 typedef struct {
-  BD_ADDR peer_addr; /* BD address of peer */
+  RawAddress peer_addr; /* BD address of peer */
   /*
    * NOTE: idle_ccb_timer, ret_ccb_timer and rsp_ccb_timer are mutually
    * exclusive - no more than one timer should be running at the same time.
@@ -516,8 +516,8 @@ typedef struct {
   tAVDT_SCB scb[AVDT_NUM_SEPS];    /* stream control blocks */
   tAVDT_AD ad;                     /* adaption layer control block */
   tAVDTC_CTRL_CBACK* p_conf_cback; /* conformance callback function */
-  tAVDT_CCB_ACTION* p_ccb_act;     /* pointer to CCB action functions */
-  tAVDT_SCB_ACTION* p_scb_act;     /* pointer to SCB action functions */
+  const tAVDT_CCB_ACTION* p_ccb_act; /* pointer to CCB action functions */
+  const tAVDT_SCB_ACTION* p_scb_act; /* pointer to SCB action functions */
   tAVDT_CTRL_CBACK* p_conn_cback;  /* connection callback function */
   uint8_t trace_level;             /* trace level */
 } tAVDT_CB;
@@ -530,8 +530,8 @@ typedef struct {
 extern void avdt_ccb_init(void);
 extern void avdt_ccb_event(tAVDT_CCB* p_ccb, uint8_t event,
                            tAVDT_CCB_EVT* p_data);
-extern tAVDT_CCB* avdt_ccb_by_bd(BD_ADDR bd_addr);
-extern tAVDT_CCB* avdt_ccb_alloc(BD_ADDR bd_addr);
+extern tAVDT_CCB* avdt_ccb_by_bd(const RawAddress& bd_addr);
+extern tAVDT_CCB* avdt_ccb_alloc(const RawAddress& bd_addr);
 extern void avdt_ccb_dealloc(tAVDT_CCB* p_ccb, tAVDT_CCB_EVT* p_data);
 extern uint8_t avdt_ccb_to_idx(tAVDT_CCB* p_ccb);
 extern tAVDT_CCB* avdt_ccb_by_idx(uint8_t idx);

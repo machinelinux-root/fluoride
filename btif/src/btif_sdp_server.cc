@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- * Copyright (C) 2014 Samsung System LSI
+ * Copyright 2014 Samsung System LSI
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -214,7 +214,8 @@ static int alloc_sdp_slot(bluetooth_sdp_record* in_record) {
 static int free_sdp_slot(int id) {
   int handle = -1;
   bluetooth_sdp_record* record = NULL;
-  if (id >= MAX_SDP_SLOTS) {
+  if (id < 0 || id >= MAX_SDP_SLOTS) {
+    android_errorWriteLog(0x534e4554, "37502513");
     APPL_TRACE_ERROR("%s() failed - id %d is invalid", __func__, id);
     return handle;
   }
@@ -355,7 +356,7 @@ void on_remove_record_event(int handle) {
   if (handle != -1 && handle != 0) {
     bool result;
     result = SDP_DeleteRecord(handle);
-    if (result == false) {
+    if (!result) {
       BTIF_TRACE_ERROR("  Unable to remove handle 0x%08x", handle);
     }
   }

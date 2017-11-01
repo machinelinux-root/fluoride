@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- *  Copyright (C) 2009-2012 Broadcom Corporation
+ *  Copyright 2009-2012 Broadcom Corporation
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -64,7 +64,7 @@ typedef enum {
  *
  ******************************************************************************/
 
-bt_bdaddr_t btif_av_get_addr(void);
+RawAddress btif_av_get_addr(void);
 
 /*******************************************************************************
  * Function         btif_av_is_sink_enabled

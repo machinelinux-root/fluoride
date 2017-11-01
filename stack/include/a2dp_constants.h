@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- *  Copyright (C) 2000-2012 Broadcom Corporation
+ *  Copyright 2000-2012 Broadcom Corporation
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -37,8 +37,8 @@
 #define A2DP_SUPF_AMP 0x0008
 
 /* AV Media Codec Types (Audio Codec ID) */
-/* SBC media codec type */
-#define A2DP_MEDIA_CT_SBC 0x00
+#define A2DP_MEDIA_CT_SBC 0x00 /* SBC media codec type */
+#define A2DP_MEDIA_CT_AAC 0x02 /* AAC media codec type */
 /* Non-A2DP media codec type (vendor-specific codec) */
 #define A2DP_MEDIA_CT_NON_A2DP 0xFF
 

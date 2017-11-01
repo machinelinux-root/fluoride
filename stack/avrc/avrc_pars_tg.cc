@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- *  Copyright (C) 2003-2016 Broadcom Corporation
+ *  Copyright 2003-2016 Broadcom Corporation
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -546,4 +546,4 @@ tAVRC_STS AVRC_ParsCommand(tAVRC_MSG* p_msg, tAVRC_COMMAND* p_result,
   return status;
 }
 
-#endif /* (AVRC_METADATA_INCLUDED == true) */
+#endif /* (AVRC_METADATA_INCLUDED == TRUE) */

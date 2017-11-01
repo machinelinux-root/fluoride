@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- *  Copyright (C) 2003-2012 Broadcom Corporation
+ *  Copyright 2003-2012 Broadcom Corporation
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -49,10 +49,10 @@
 
 #ifndef BTA_AG_SCO_PKT_TYPES
 /* S1 packet type setting from HFP 1.5 spec */
-#define BTA_AG_SCO_PKT_TYPES /* BTM_SCO_LINK_ALL_PKT_MASK */           \
-  (BTM_SCO_LINK_ONLY_MASK | BTM_SCO_PKT_TYPES_MASK_EV3 |               \
-   BTM_SCO_PKT_TYPES_MASK_NO_3_EV3 | BTM_SCO_PKT_TYPES_MASK_NO_2_EV5 | \
-   BTM_SCO_PKT_TYPES_MASK_NO_3_EV5)
+#define BTA_AG_SCO_PKT_TYPES /* BTM_SCO_LINK_ALL_PKT_MASK */     \
+  (BTM_SCO_LINK_ONLY_MASK | ESCO_PKT_TYPES_MASK_EV3 |            \
+   ESCO_PKT_TYPES_MASK_NO_3_EV3 | ESCO_PKT_TYPES_MASK_NO_2_EV5 | \
+   ESCO_PKT_TYPES_MASK_NO_3_EV5)
 #endif
 
 #ifndef BTA_AG_BIND_INFO
@@ -75,4 +75,4 @@ const tBTA_AG_CFG bta_ag_cfg = {BTA_AG_CIND_INFO,        BTA_AG_BIND_INFO,
                                 BTA_AG_SCO_PKT_TYPES,    BTA_AG_CHLD_VAL_ECC,
                                 BTA_AG_CHLD_VAL};
 
-tBTA_AG_CFG* p_bta_ag_cfg = (tBTA_AG_CFG*)&bta_ag_cfg;
+const tBTA_AG_CFG* p_bta_ag_cfg = &bta_ag_cfg;

@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- *  Copyright (C) 2014 Google, Inc.
+ *  Copyright 2014 Google, Inc.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -32,6 +32,7 @@
 #include <hardware/bt_sock.h>
 
 #include "btif_common.h"
+#include "device/include/esco_parameters.h"
 #include "osi/include/allocator.h"
 #include "osi/include/list.h"
 #include "osi/include/log.h"
@@ -63,19 +64,8 @@ typedef struct {
   bool connect_completed;
 } sco_socket_t;
 
-// TODO: verify packet types that are being sent OTA.
-static tBTM_ESCO_PARAMS sco_parameters = {
-    BTM_64KBITS_RATE, /* TX Bandwidth (64 kbits/sec)              */
-    BTM_64KBITS_RATE, /* RX Bandwidth (64 kbits/sec)              */
-    0x000a,           /* 10 ms (HS/HF can use EV3, 2-EV3, 3-EV3)  */
-    0x0060,           /* Inp Linear, Air CVSD, 2s Comp, 16bit     */
-    (BTM_SCO_LINK_ALL_PKT_MASK | BTM_SCO_PKT_TYPES_MASK_NO_2_EV5 |
-     BTM_SCO_PKT_TYPES_MASK_NO_3_EV5),
-    BTM_ESCO_RETRANS_POWER /* Retransmission effort                      */
-};
-
 static sco_socket_t* sco_socket_establish_locked(bool is_listening,
-                                                 const bt_bdaddr_t* bd_addr,
+                                                 const RawAddress* bd_addr,
                                                  int* sock_fd);
 static sco_socket_t* sco_socket_new(void);
 static void sco_socket_free_locked(sco_socket_t* socket);
@@ -100,7 +90,8 @@ bt_status_t btsock_sco_init(thread_t* thread_) {
   if (!sco_sockets) return BT_STATUS_FAIL;
 
   thread = thread_;
-  BTM_SetEScoMode(BTM_LINK_TYPE_ESCO, &sco_parameters);
+  enh_esco_params_t params = esco_parameters_for_codec(ESCO_CODEC_CVSD);
+  BTM_SetEScoMode(&params);
 
   return BT_STATUS_SUCCESS;
 }
@@ -125,7 +116,7 @@ bt_status_t btsock_sco_listen(int* sock_fd, UNUSED_ATTR int flags) {
   return BT_STATUS_SUCCESS;
 }
 
-bt_status_t btsock_sco_connect(const bt_bdaddr_t* bd_addr, int* sock_fd,
+bt_status_t btsock_sco_connect(const RawAddress* bd_addr, int* sock_fd,
                                UNUSED_ATTR int flags) {
   CHECK(bd_addr != NULL);
   CHECK(sock_fd != NULL);
@@ -139,13 +130,13 @@ bt_status_t btsock_sco_connect(const bt_bdaddr_t* bd_addr, int* sock_fd,
 
 // Must be called with |lock| held.
 static sco_socket_t* sco_socket_establish_locked(bool is_listening,
-                                                 const bt_bdaddr_t* bd_addr,
+                                                 const RawAddress* bd_addr,
                                                  int* sock_fd) {
   int pair[2] = {INVALID_FD, INVALID_FD};
   sco_socket_t* sco_socket = NULL;
   socket_t* socket = NULL;
   tBTM_STATUS status;
-
+  enh_esco_params_t params;
   if (socketpair(AF_LOCAL, SOCK_STREAM, 0, pair) == -1) {
     LOG_ERROR(LOG_TAG, "%s unable to allocate socket pair: %s", __func__,
               strerror(errno));
@@ -158,9 +149,10 @@ static sco_socket_t* sco_socket_establish_locked(bool is_listening,
     goto error;
   }
 
-  status = BTM_CreateSco((uint8_t*)bd_addr, !is_listening,
-                         sco_parameters.packet_types, &sco_socket->sco_handle,
-                         connect_completed_cb, disconnect_completed_cb);
+  params = esco_parameters_for_codec(ESCO_CODEC_CVSD);
+  status = BTM_CreateSco(bd_addr, !is_listening, params.packet_types,
+                         &sco_socket->sco_handle, connect_completed_cb,
+                         disconnect_completed_cb);
   if (status != BTM_CMD_STARTED) {
     LOG_ERROR(LOG_TAG, "%s unable to create SCO socket: %d", __func__, status);
     goto error;
@@ -260,7 +252,7 @@ static void connection_request_cb(tBTM_ESCO_EVT event,
 
   sock_connect_signal_t connect_signal;
   connect_signal.size = sizeof(connect_signal);
-  memcpy(&connect_signal.bd_addr, conn_data->bd_addr, sizeof(bt_bdaddr_t));
+  connect_signal.bd_addr = conn_data->bd_addr;
   connect_signal.channel = 0;
   connect_signal.status = 0;
 

@@ -1,7 +1,7 @@
 /******************************************************************************
  *
  *  Copyright (c) 2014 The Android Open Source Project
- *  Copyright (C) 2004-2012 Broadcom Corporation
+ *  Copyright 2004-2012 Broadcom Corporation
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -20,58 +20,22 @@
 
 #include "bt_trace.h"
 #include "bt_utils.h"
+#include "bta_ag_api.h"
 #include "bta_hf_client_int.h"
+#include "device/include/esco_parameters.h"
 #include "osi/include/osi.h"
 
-#define BTA_HF_CLIENT_NO_EDR_ESCO                                      \
-  (BTM_SCO_PKT_TYPES_MASK_NO_2_EV3 | BTM_SCO_PKT_TYPES_MASK_NO_3_EV3 | \
-   BTM_SCO_PKT_TYPES_MASK_NO_2_EV5 | BTM_SCO_PKT_TYPES_MASK_NO_3_EV5)
-
-static const tBTM_ESCO_PARAMS bta_hf_client_esco_params[] = {
-    /* SCO CVSD */
-    {
-        .rx_bw = BTM_64KBITS_RATE,
-        .tx_bw = BTM_64KBITS_RATE,
-        .max_latency = 10,
-        .voice_contfmt = BTM_VOICE_SETTING_CVSD,
-        .packet_types =
-            (BTM_SCO_LINK_ONLY_MASK | BTM_SCO_PKT_TYPES_MASK_NO_2_EV3 |
-             BTM_SCO_PKT_TYPES_MASK_NO_3_EV3 | BTM_SCO_PKT_TYPES_MASK_NO_2_EV5 |
-             BTM_SCO_PKT_TYPES_MASK_NO_3_EV5),
-        .retrans_effort = BTM_ESCO_RETRANS_POWER,
-    },
-    /* ESCO CVSD */
-    {
-        .rx_bw = BTM_64KBITS_RATE,
-        .tx_bw = BTM_64KBITS_RATE,
-        .max_latency = 10,
-        .voice_contfmt = BTM_VOICE_SETTING_CVSD,
-        /* Allow controller to use all types available except 5-slot EDR */
-        .packet_types =
-            (BTM_SCO_LINK_ALL_PKT_MASK | BTM_SCO_PKT_TYPES_MASK_NO_2_EV5 |
-             BTM_SCO_PKT_TYPES_MASK_NO_3_EV5),
-        .retrans_effort = BTM_ESCO_RETRANS_POWER,
-    },
-    /* ESCO mSBC */
-    {
-        .rx_bw = BTM_64KBITS_RATE,
-        .tx_bw = BTM_64KBITS_RATE,
-        .max_latency = 13,
-        .voice_contfmt = BTM_VOICE_SETTING_TRANS,
-        /* Packet Types : EV3 + 2-EV3               */
-        .packet_types =
-            (BTM_SCO_PKT_TYPES_MASK_EV3 | BTM_SCO_PKT_TYPES_MASK_NO_3_EV3 |
-             BTM_SCO_PKT_TYPES_MASK_NO_2_EV5 | BTM_SCO_PKT_TYPES_MASK_NO_3_EV5),
-        .retrans_effort = BTM_ESCO_RETRANS_QUALITY,
-    }};
+#define BTA_HF_CLIENT_NO_EDR_ESCO                                \
+  (ESCO_PKT_TYPES_MASK_NO_2_EV3 | ESCO_PKT_TYPES_MASK_NO_3_EV3 | \
+   ESCO_PKT_TYPES_MASK_NO_2_EV5 | ESCO_PKT_TYPES_MASK_NO_3_EV5)
 
 enum {
   BTA_HF_CLIENT_SCO_LISTEN_E,
   BTA_HF_CLIENT_SCO_OPEN_E,       /* open request */
   BTA_HF_CLIENT_SCO_CLOSE_E,      /* close request */
   BTA_HF_CLIENT_SCO_SHUTDOWN_E,   /* shutdown request */
-  BTA_HF_CLIENT_SCO_CONN_OPEN_E,  /* sco opened */
-  BTA_HF_CLIENT_SCO_CONN_CLOSE_E, /* sco closed */
+  BTA_HF_CLIENT_SCO_CONN_OPEN_E,  /* SCO opened */
+  BTA_HF_CLIENT_SCO_CONN_CLOSE_E, /* SCO closed */
 };
 
 /*******************************************************************************
@@ -79,18 +43,15 @@ enum {
  * Function         bta_hf_client_remove_sco
  *
  * Description      Removes the specified SCO from the system.
- *                  If only_active is true, then SCO is only removed if
- *                  connected.
  *
  * Returns          bool   - true if SCO removal was started
  *
  ******************************************************************************/
-static bool bta_hf_client_sco_remove(tBTA_HF_CLIENT_CB* client_cb,
-                                     bool only_active) {
+static bool bta_hf_client_sco_remove(tBTA_HF_CLIENT_CB* client_cb) {
   bool removed_started = false;
   tBTM_STATUS status;
 
-  APPL_TRACE_DEBUG("%s: %d", __func__, only_active);
+  APPL_TRACE_DEBUG("%s", __func__);
 
   if (client_cb->sco_idx != BTM_INVALID_SCO_INDEX) {
     status = BTM_RemoveSco(client_cb->sco_idx);
@@ -101,7 +62,7 @@ static bool bta_hf_client_sco_remove(tBTA_HF_CLIENT_CB* client_cb,
     if (status == BTM_CMD_STARTED) {
       removed_started = true;
     }
-    /* If no connection reset the sco handle */
+    /* If no connection reset the SCO handle */
     else if ((status == BTM_SUCCESS) || (status == BTM_UNKNOWN_ADDR)) {
       client_cb->sco_idx = BTM_INVALID_SCO_INDEX;
     }
@@ -123,10 +84,10 @@ void bta_hf_client_cback_sco(tBTA_HF_CLIENT_CB* client_cb, uint8_t event) {
   tBTA_HF_CLIENT evt;
 
   memset(&evt, 0, sizeof(evt));
-  bdcpy(evt.bd_addr, client_cb->peer_addr);
+  evt.bd_addr = client_cb->peer_addr;
 
   /* call app cback */
-  bta_hf_client_app_callback(event, (tBTA_HF_CLIENT*)&evt);
+  bta_hf_client_app_callback(event, &evt);
 }
 
 /*******************************************************************************
@@ -141,16 +102,21 @@ void bta_hf_client_cback_sco(tBTA_HF_CLIENT_CB* client_cb, uint8_t event) {
  ******************************************************************************/
 static void bta_hf_client_sco_conn_rsp(tBTA_HF_CLIENT_CB* client_cb,
                                        tBTM_ESCO_CONN_REQ_EVT_DATA* p_data) {
-  tBTM_ESCO_PARAMS resp;
+  enh_esco_params_t resp;
   uint8_t hci_status = HCI_SUCCESS;
 
   APPL_TRACE_DEBUG("%s", __func__);
 
   if (client_cb->sco_state == BTA_HF_CLIENT_SCO_LISTEN_ST) {
     if (p_data->link_type == BTM_LINK_TYPE_SCO) {
-      resp = bta_hf_client_esco_params[0];
+      resp = esco_parameters_for_codec(ESCO_CODEC_CVSD);
     } else {
-      resp = bta_hf_client_esco_params[client_cb->negotiated_codec];
+      if (client_cb->negotiated_codec == BTA_AG_CODEC_MSBC) {
+        resp = esco_parameters_for_codec(ESCO_CODEC_MSBC_T1);
+      } else {
+        // default codec
+        resp = esco_parameters_for_codec(ESCO_CODEC_CVSD);
+      }
     }
 
     /* tell sys to stop av if any */
@@ -179,7 +145,7 @@ static void bta_hf_client_esco_connreq_cback(tBTM_ESCO_EVT event,
   tBTA_HF_CLIENT_CB* client_cb =
       bta_hf_client_find_cb_by_sco_handle(p_data->conn_evt.sco_inx);
   if (client_cb == NULL) {
-    APPL_TRACE_ERROR("%s: wrong sco handle to control block %d", __func__,
+    APPL_TRACE_ERROR("%s: wrong SCO handle to control block %d", __func__,
                      p_data->conn_evt.sco_inx);
     return;
   }
@@ -257,51 +223,26 @@ static void bta_hf_client_sco_disc_cback(uint16_t sco_idx) {
 static void bta_hf_client_sco_create(tBTA_HF_CLIENT_CB* client_cb,
                                      bool is_orig) {
   tBTM_STATUS status;
-  uint8_t* p_bd_addr = NULL;
-  tBTM_ESCO_PARAMS params;
 
   APPL_TRACE_DEBUG("%s: %d", __func__, is_orig);
 
-  /* Make sure this sco handle is not already in use */
+  /* Make sure this SCO handle is not already in use */
   if (client_cb->sco_idx != BTM_INVALID_SCO_INDEX) {
     APPL_TRACE_WARNING("%s: Index 0x%04x already in use", __func__,
                        client_cb->sco_idx);
     return;
   }
 
-  params = bta_hf_client_esco_params[1];
+  enh_esco_params_t params = esco_parameters_for_codec(ESCO_CODEC_CVSD);
 
   /* if initiating set current scb and peer bd addr */
   if (is_orig) {
-    /* Attempt to use eSCO if remote host supports HFP >= 1.5 */
-    if (client_cb->peer_version >= HFP_VERSION_1_5 &&
-        !client_cb->retry_with_sco_only) {
-      BTM_SetEScoMode(BTM_LINK_TYPE_ESCO, &params);
-      /* If ESCO or EDR ESCO, retry with SCO only in case of failure */
-      if ((params.packet_types & BTM_ESCO_LINK_ONLY_MASK) ||
-          !((params.packet_types &
-             ~(BTM_ESCO_LINK_ONLY_MASK | BTM_SCO_LINK_ONLY_MASK)) ^
-            BTA_HF_CLIENT_NO_EDR_ESCO)) {
-        client_cb->retry_with_sco_only = true;
-        APPL_TRACE_API("Setting retry_with_sco_only to true");
-      }
-    } else {
-      if (client_cb->retry_with_sco_only)
-        APPL_TRACE_API("retrying with SCO only");
-      client_cb->retry_with_sco_only = false;
-
-      BTM_SetEScoMode(BTM_LINK_TYPE_SCO, &params);
-    }
-
+    BTM_SetEScoMode(&params);
     /* tell sys to stop av if any */
     bta_sys_sco_use(BTA_ID_HS, 1, client_cb->peer_addr);
-  } else {
-    client_cb->retry_with_sco_only = false;
   }
 
-  p_bd_addr = client_cb->peer_addr;
-
-  status = BTM_CreateSco(p_bd_addr, is_orig, params.packet_types,
+  status = BTM_CreateSco(&client_cb->peer_addr, is_orig, params.packet_types,
                          &client_cb->sco_idx, bta_hf_client_sco_conn_cback,
                          bta_hf_client_sco_disc_cback);
   if (status == BTM_CMD_STARTED && !is_orig) {
@@ -327,16 +268,29 @@ static void bta_hf_client_sco_create(tBTA_HF_CLIENT_CB* client_cb,
  ******************************************************************************/
 static void bta_hf_client_sco_event(tBTA_HF_CLIENT_CB* client_cb,
                                     uint8_t event) {
-  APPL_TRACE_DEBUG("%s: state: %d event: %d", __func__, client_cb->sco_state,
-                   event);
+  APPL_TRACE_DEBUG("%s: before state: %d event: %d", __func__,
+                   client_cb->sco_state, event);
 
   switch (client_cb->sco_state) {
     case BTA_HF_CLIENT_SCO_SHUTDOWN_ST:
       switch (event) {
+        // For WBS we only listen to SCO requests. Even for outgoing SCO
+        // requests we first do a AT+BCC and wait for remote to initiate SCO
         case BTA_HF_CLIENT_SCO_LISTEN_E:
-          /* create sco listen connection */
+          /* create SCO listen connection */
           bta_hf_client_sco_create(client_cb, false);
           client_cb->sco_state = BTA_HF_CLIENT_SCO_LISTEN_ST;
+          break;
+
+        // For non WBS cases and enabling outgoing SCO requests we need to force
+        // open a SCO channel
+        case BTA_HF_CLIENT_SCO_OPEN_E:
+          /* remove listening connection */
+          bta_hf_client_sco_remove(client_cb);
+
+          /* create SCO connection to peer */
+          bta_hf_client_sco_create(client_cb, true);
+          client_cb->sco_state = BTA_HF_CLIENT_SCO_OPENING_ST;
           break;
 
         default:
@@ -349,43 +303,36 @@ static void bta_hf_client_sco_event(tBTA_HF_CLIENT_CB* client_cb,
     case BTA_HF_CLIENT_SCO_LISTEN_ST:
       switch (event) {
         case BTA_HF_CLIENT_SCO_LISTEN_E:
-          /* create sco listen connection (Additional channel) */
+          /* create SCO listen connection */
           bta_hf_client_sco_create(client_cb, false);
-          break;
 
         case BTA_HF_CLIENT_SCO_OPEN_E:
           /* remove listening connection */
-          bta_hf_client_sco_remove(client_cb, false);
+          bta_hf_client_sco_remove(client_cb);
 
-          /* create sco connection to peer */
+          /* create SCO connection to peer */
           bta_hf_client_sco_create(client_cb, true);
           client_cb->sco_state = BTA_HF_CLIENT_SCO_OPENING_ST;
           break;
 
         case BTA_HF_CLIENT_SCO_SHUTDOWN_E:
+        case BTA_HF_CLIENT_SCO_CLOSE_E:
           /* remove listening connection */
-          bta_hf_client_sco_remove(client_cb, false);
+          bta_hf_client_sco_remove(client_cb);
 
           client_cb->sco_state = BTA_HF_CLIENT_SCO_SHUTDOWN_ST;
           break;
 
-        case BTA_HF_CLIENT_SCO_CLOSE_E:
-          /* remove listening connection */
-          /* Ignore the event. We need to keep listening SCO for the active SLC
-           */
-          APPL_TRACE_WARNING("BTA_HF_CLIENT_SCO_LISTEN_ST: Ignoring event %d",
-                             event);
-          break;
-
         case BTA_HF_CLIENT_SCO_CONN_CLOSE_E:
-          /* sco failed; create sco listen connection */
+          /* SCO failed; create SCO listen connection */
           bta_hf_client_sco_create(client_cb, false);
           client_cb->sco_state = BTA_HF_CLIENT_SCO_LISTEN_ST;
           break;
 
         default:
-          APPL_TRACE_WARNING("BTA_HF_CLIENT_SCO_LISTEN_ST: Ignoring event %d",
-                             event);
+          APPL_TRACE_WARNING(
+              "%s: BTA_HF_CLIENT_SCO_LISTEN_ST: Ignoring event %d", __func__,
+              event);
           break;
       }
       break;
@@ -405,7 +352,7 @@ static void bta_hf_client_sco_event(tBTA_HF_CLIENT_CB* client_cb,
           break;
 
         case BTA_HF_CLIENT_SCO_CONN_CLOSE_E:
-          /* sco failed; create sco listen connection */
+          /* SCO failed; create SCO listen connection */
           bta_hf_client_sco_create(client_cb, false);
           client_cb->sco_state = BTA_HF_CLIENT_SCO_LISTEN_ST;
           break;
@@ -428,14 +375,14 @@ static void bta_hf_client_sco_event(tBTA_HF_CLIENT_CB* client_cb,
           break;
 
         case BTA_HF_CLIENT_SCO_CONN_OPEN_E:
-          /* close sco connection */
-          bta_hf_client_sco_remove(client_cb, true);
+          /* close SCO connection */
+          bta_hf_client_sco_remove(client_cb);
 
           client_cb->sco_state = BTA_HF_CLIENT_SCO_CLOSING_ST;
           break;
 
         case BTA_HF_CLIENT_SCO_CONN_CLOSE_E:
-          /* sco failed; create sco listen connection */
+          /* SCO failed; create SCO listen connection */
 
           client_cb->sco_state = BTA_HF_CLIENT_SCO_LISTEN_ST;
           break;
@@ -450,21 +397,20 @@ static void bta_hf_client_sco_event(tBTA_HF_CLIENT_CB* client_cb,
     case BTA_HF_CLIENT_SCO_OPEN_ST:
       switch (event) {
         case BTA_HF_CLIENT_SCO_CLOSE_E:
-          /* close sco connection if active */
-          if (bta_hf_client_sco_remove(client_cb, true)) {
+          if (bta_hf_client_sco_remove(client_cb)) {
             client_cb->sco_state = BTA_HF_CLIENT_SCO_CLOSING_ST;
           }
           break;
 
         case BTA_HF_CLIENT_SCO_SHUTDOWN_E:
-          /* remove all listening connections */
-          bta_hf_client_sco_remove(client_cb, false);
+          /* remove listening connection */
+          bta_hf_client_sco_remove(client_cb);
 
           client_cb->sco_state = BTA_HF_CLIENT_SCO_SHUTTING_ST;
           break;
 
         case BTA_HF_CLIENT_SCO_CONN_CLOSE_E:
-          /* peer closed sco; create sco listen connection */
+          /* peer closed SCO */
           bta_hf_client_sco_create(client_cb, false);
           client_cb->sco_state = BTA_HF_CLIENT_SCO_LISTEN_ST;
           break;
@@ -487,9 +433,8 @@ static void bta_hf_client_sco_event(tBTA_HF_CLIENT_CB* client_cb,
           break;
 
         case BTA_HF_CLIENT_SCO_CONN_CLOSE_E:
-          /* peer closed sco; create sco listen connection */
+          /* peer closed sco; create SCO listen connection */
           bta_hf_client_sco_create(client_cb, false);
-
           client_cb->sco_state = BTA_HF_CLIENT_SCO_LISTEN_ST;
           break;
 
@@ -511,7 +456,7 @@ static void bta_hf_client_sco_event(tBTA_HF_CLIENT_CB* client_cb,
           break;
 
         case BTA_HF_CLIENT_SCO_CONN_CLOSE_E:
-          /* open sco connection */
+          /* open SCO connection */
           bta_hf_client_sco_create(client_cb, true);
           client_cb->sco_state = BTA_HF_CLIENT_SCO_OPENING_ST;
           break;
@@ -526,8 +471,8 @@ static void bta_hf_client_sco_event(tBTA_HF_CLIENT_CB* client_cb,
     case BTA_HF_CLIENT_SCO_SHUTTING_ST:
       switch (event) {
         case BTA_HF_CLIENT_SCO_CONN_OPEN_E:
-          /* close sco connection; wait for conn close event */
-          bta_hf_client_sco_remove(client_cb, true);
+          /* close SCO connection; wait for conn close event */
+          bta_hf_client_sco_remove(client_cb);
           break;
 
         case BTA_HF_CLIENT_SCO_CONN_CLOSE_E:
@@ -548,6 +493,8 @@ static void bta_hf_client_sco_event(tBTA_HF_CLIENT_CB* client_cb,
     default:
       break;
   }
+
+  APPL_TRACE_DEBUG("%s: after state: %d", __func__, client_cb->sco_state);
 }
 
 /*******************************************************************************
@@ -620,8 +567,6 @@ void bta_hf_client_sco_conn_open(tBTA_HF_CLIENT_DATA* p_data) {
   } else {
     bta_hf_client_cback_sco(client_cb, BTA_HF_CLIENT_AUDIO_OPEN_EVT);
   }
-
-  client_cb->retry_with_sco_only = false;
 }
 
 /*******************************************************************************
@@ -648,26 +593,19 @@ void bta_hf_client_sco_conn_close(tBTA_HF_CLIENT_DATA* p_data) {
   /* clear current scb */
   client_cb->sco_idx = BTM_INVALID_SCO_INDEX;
 
-  /* retry_with_sco_only, will be set only when initiator
-  ** and HFClient is first trying to establish an eSCO connection */
-  if (client_cb->retry_with_sco_only && client_cb->svc_conn) {
-    bta_hf_client_sco_create(client_cb, true);
-  } else {
-    bta_hf_client_sco_event(client_cb, BTA_HF_CLIENT_SCO_CONN_CLOSE_E);
+  bta_hf_client_sco_event(client_cb, BTA_HF_CLIENT_SCO_CONN_CLOSE_E);
 
-    bta_sys_sco_close(BTA_ID_HS, 1, client_cb->peer_addr);
+  bta_sys_sco_close(BTA_ID_HS, 1, client_cb->peer_addr);
 
-    bta_sys_sco_unuse(BTA_ID_HS, 1, client_cb->peer_addr);
+  bta_sys_sco_unuse(BTA_ID_HS, 1, client_cb->peer_addr);
 
-    /* call app callback */
-    bta_hf_client_cback_sco(client_cb, BTA_HF_CLIENT_AUDIO_CLOSE_EVT);
+  /* call app callback */
+  bta_hf_client_cback_sco(client_cb, BTA_HF_CLIENT_AUDIO_CLOSE_EVT);
 
-    if (client_cb->sco_close_rfc == true) {
-      client_cb->sco_close_rfc = false;
-      bta_hf_client_rfc_do_close(p_data);
-    }
+  if (client_cb->sco_close_rfc) {
+    client_cb->sco_close_rfc = false;
+    bta_hf_client_rfc_do_close(p_data);
   }
-  client_cb->retry_with_sco_only = false;
 }
 
 /*******************************************************************************

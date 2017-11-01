@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- *  Copyright (C) 2013 Google, Inc.
+ *  Copyright 2013 Google, Inc.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -55,12 +55,9 @@ void btsnoop_net_open() {
 
   listen_thread_valid_ =
       (pthread_create(&listen_thread_, NULL, listen_fn_, NULL) == 0);
-  if (!listen_thread_valid_) {
+  if (!listen_thread_valid_)
     LOG_ERROR(LOG_TAG, "%s pthread_create failed: %s", __func__,
               strerror(errno));
-  } else {
-    LOG_DEBUG(LOG_TAG, "initialized");
-  }
 }
 
 void btsnoop_net_close() {

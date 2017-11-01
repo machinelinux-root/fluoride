@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- *  Copyright (C) 2004-2012 Broadcom Corporation
+ *  Copyright 2004-2012 Broadcom Corporation
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -321,39 +321,39 @@ static void bta_ag_send_ind(tBTA_AG_SCB* p_scb, uint16_t id, uint16_t value,
   /* Ensure we do not send duplicate indicators if not requested by app */
   /* If it was requested by app, transmit CIEV even if it is duplicate. */
   if (id == BTA_AG_IND_CALL) {
-    if ((value == p_scb->call_ind) && (on_demand == false)) return;
+    if ((value == p_scb->call_ind) && (!on_demand)) return;
 
     p_scb->call_ind = (uint8_t)value;
   }
 
-  if ((id == BTA_AG_IND_CALLSETUP) && (on_demand == false)) {
+  if ((id == BTA_AG_IND_CALLSETUP) && (!on_demand)) {
     if (value == p_scb->callsetup_ind) return;
 
     p_scb->callsetup_ind = (uint8_t)value;
   }
 
-  if ((id == BTA_AG_IND_SERVICE) && (on_demand == false)) {
+  if ((id == BTA_AG_IND_SERVICE) && (!on_demand)) {
     if (value == p_scb->service_ind) return;
 
     p_scb->service_ind = (uint8_t)value;
   }
-  if ((id == BTA_AG_IND_SIGNAL) && (on_demand == false)) {
+  if ((id == BTA_AG_IND_SIGNAL) && (!on_demand)) {
     if (value == p_scb->signal_ind) return;
 
     p_scb->signal_ind = (uint8_t)value;
   }
-  if ((id == BTA_AG_IND_ROAM) && (on_demand == false)) {
+  if ((id == BTA_AG_IND_ROAM) && (!on_demand)) {
     if (value == p_scb->roam_ind) return;
 
     p_scb->roam_ind = (uint8_t)value;
   }
-  if ((id == BTA_AG_IND_BATTCHG) && (on_demand == false)) {
+  if ((id == BTA_AG_IND_BATTCHG) && (!on_demand)) {
     if (value == p_scb->battchg_ind) return;
 
     p_scb->battchg_ind = (uint8_t)value;
   }
 
-  if ((id == BTA_AG_IND_CALLHELD) && (on_demand == false)) {
+  if ((id == BTA_AG_IND_CALLHELD) && (!on_demand)) {
     /* call swap could result in sending callheld=1 multiple times */
     if ((value != 1) && (value == p_scb->callheld_ind)) return;
 
@@ -443,7 +443,6 @@ static uint8_t bta_ag_parse_chld(UNUSED_ATTR tBTA_AG_SCB* p_scb, char* p_s) {
   return (retval);
 }
 
-#if (BTM_WBS_INCLUDED == TRUE)
 /*******************************************************************************
  *
  * Function         bta_ag_parse_bac
@@ -492,7 +491,6 @@ static tBTA_AG_PEER_CODEC bta_ag_parse_bac(tBTA_AG_SCB* p_scb, char* p_s) {
 
   return (retval);
 }
-#endif
 
 /*******************************************************************************
  *
@@ -615,6 +613,19 @@ void bta_ag_at_hsp_cback(tBTA_AG_SCB* p_scb, uint16_t command_id,
   (*bta_ag_cb.p_cback)(command_id, (tBTA_AG*)&val);
 }
 
+static void remove_spaces(char* str) {
+  char* dest_str = str;
+
+  while (*str) {
+    if (*str == ' ') {
+      str++;
+    } else {
+      *dest_str++ = *str++;
+    }
+  }
+  *dest_str = '\0';
+}
+
 /*******************************************************************************
  *
  * Function         bta_ag_find_empty_hf_ind)
@@ -708,7 +719,7 @@ static void bta_ag_bind_response(tBTA_AG_SCB* p_scb, uint8_t arg_type) {
       if (bta_ag_local_hf_ind_cfg[i + 1].is_supported) {
         /* Add ',' from second indicator */
         if (index > 1) buffer[index++] = ',';
-        snprintf(&buffer[index++], 1, "%d",
+        snprintf(&buffer[index++], 2, "%d",
                  bta_ag_local_hf_ind_cfg[i + 1].ind_id);
       }
     }
@@ -739,8 +750,7 @@ static void bta_ag_bind_response(tBTA_AG_SCB* p_scb, uint8_t arg_type) {
           p_scb->local_hf_indicators[i].ind_id);
 
       /* Check whether local and peer sides support this indicator */
-      if (p_scb->local_hf_indicators[i].is_supported == true &&
-          peer_index != -1) {
+      if (p_scb->local_hf_indicators[i].is_supported && peer_index != -1) {
         /* In the format of ind, state */
         p += utl_itoa((uint16_t)p_scb->local_hf_indicators[i].ind_id, p);
         *p++ = ',';
@@ -830,24 +840,21 @@ void bta_ag_at_hfp_cback(tBTA_AG_SCB* p_scb, uint16_t cmd, uint8_t arg_type,
   tBTA_AG_SCB* ag_scb;
   uint32_t i, ind_id;
   uint32_t bia_masked_out;
-#if (BTM_WBS_INCLUDED == TRUE)
-  tBTA_AG_PEER_CODEC codec_type, codec_sent;
-#endif
   if (p_arg == NULL) {
     APPL_TRACE_ERROR("%s: p_arg is null, send error and return", __func__);
     bta_ag_send_error(p_scb, BTA_AG_ERR_INV_CHAR_IN_TSTR);
     return;
   }
 
-  APPL_TRACE_DEBUG("HFP AT cmd:%d arg_type:%d arg:%d arg:%s", cmd, arg_type,
-                   int_arg, p_arg);
+  APPL_TRACE_DEBUG("%s: AT command %d, arg_type %d, int_arg %d, arg %s",
+                   __func__, cmd, arg_type, int_arg, p_arg);
 
   memset(&val, 0, sizeof(tBTA_AG_VAL));
   val.hdr.handle = bta_ag_scb_to_idx(p_scb);
   val.hdr.app_id = p_scb->app_id;
   val.hdr.status = BTA_AG_SUCCESS;
   val.num = int_arg;
-  bdcpy(val.bd_addr, p_scb->peer_addr);
+  val.bd_addr = p_scb->peer_addr;
   strlcpy(val.str, p_arg, sizeof(val.str));
 
   /**
@@ -879,12 +886,16 @@ void bta_ag_at_hfp_cback(tBTA_AG_SCB* p_scb, uint16_t cmd, uint8_t arg_type,
       ** Let application decide whether to send OK or ERROR*/
 
       /* if mem dial cmd, make sure string contains only digits */
-      if (p_arg[0] == '>') {
-        if (!utl_isintstr(p_arg + 1)) {
+      if (val.str[0] == '>') {
+        /* Some car kits may add some unwanted space characters in the
+        ** input string. This workaround will trim the unwanted chars. */
+        remove_spaces(val.str + 1);
+
+        if (!utl_isintstr(val.str + 1)) {
           event = 0;
           bta_ag_send_error(p_scb, BTA_AG_ERR_INV_CHAR_IN_DSTR);
         }
-      } else if (p_arg[0] == 'V') /* ATDV : Dial VoIP Call */
+      } else if (val.str[0] == 'V') /* ATDV : Dial VoIP Call */
       {
         /* We do not check string. Code will be added later if needed. */
         if (!((p_scb->peer_features & BTA_AG_PEER_FEAT_VOIP) &&
@@ -896,7 +907,11 @@ void bta_ag_at_hfp_cback(tBTA_AG_SCB* p_scb, uint16_t cmd, uint8_t arg_type,
       /* If dial cmd, make sure string contains only dial digits
       ** Dial digits are 0-9, A-C, *, #, + */
       else {
-        if (!utl_isdialstr(p_arg)) {
+        /* Some car kits may add some unwanted space characters in the
+        ** input string. This workaround will trim the unwanted chars. */
+        remove_spaces(val.str);
+
+        if (!utl_isdialstr(val.str)) {
           event = 0;
           bta_ag_send_error(p_scb, BTA_AG_ERR_INV_CHAR_IN_DSTR);
         }
@@ -1173,7 +1188,6 @@ void bta_ag_at_hfp_cback(tBTA_AG_SCB* p_scb, uint16_t cmd, uint8_t arg_type,
       }
       break;
 
-#if (BTM_WBS_INCLUDED == TRUE)
     case BTA_AG_AT_BAC_EVT:
       bta_ag_send_ok(p_scb);
 
@@ -1209,7 +1223,8 @@ void bta_ag_at_hfp_cback(tBTA_AG_SCB* p_scb, uint16_t cmd, uint8_t arg_type,
       }
       break;
 
-    case BTA_AG_AT_BCS_EVT:
+    case BTA_AG_AT_BCS_EVT: {
+      tBTA_AG_PEER_CODEC codec_type, codec_sent;
       bta_ag_send_ok(p_scb);
       alarm_cancel(p_scb->codec_negotiation_timer);
 
@@ -1239,12 +1254,11 @@ void bta_ag_at_hfp_cback(tBTA_AG_SCB* p_scb, uint16_t cmd, uint8_t arg_type,
       /* send final codec info to callback */
       val.num = codec_sent;
       break;
-
+    }
     case BTA_AG_LOCAL_EVT_BCC:
       bta_ag_send_ok(p_scb);
       bta_ag_sco_open(p_scb, NULL);
       break;
-#endif
 
     default:
       bta_ag_send_error(p_scb, BTA_AG_ERR_OP_NOT_SUPPORTED);
@@ -1316,15 +1330,14 @@ void bta_ag_hsp_result(tBTA_AG_SCB* p_scb, tBTA_AG_API_RESULT* p_result) {
       if (bta_ag_sco_is_open(p_scb) || !bta_ag_inband_enabled(p_scb) ||
           (p_scb->features & BTA_AG_FEAT_NOSCO)) {
         bta_ag_send_ring(p_scb, (tBTA_AG_DATA*)p_result);
-      }
-      /* else open sco, send ring after sco opened */
-      else {
+      } else {
+        /* else open sco, send ring after sco opened */
         /* HSPv1.2: AG shall not send RING if using in-band ring tone. */
-        if (p_scb->hsp_version >= HSP_VERSION_1_2)
+        if (p_scb->peer_version >= HSP_VERSION_1_2) {
           p_scb->post_sco = BTA_AG_POST_SCO_NONE;
-        else
+        } else {
           p_scb->post_sco = BTA_AG_POST_SCO_RING;
-
+        }
         bta_ag_sco_open(p_scb, (tBTA_AG_DATA*)p_result);
       }
       break;
@@ -1337,12 +1350,14 @@ void bta_ag_hsp_result(tBTA_AG_SCB* p_scb, tBTA_AG_API_RESULT* p_result) {
       }
 
       if (!(p_scb->features & BTA_AG_FEAT_NOSCO)) {
-        /* if audio connected to this scb open sco */
-        if (p_result->data.audio_handle == bta_ag_scb_to_idx(p_scb)) {
+        /* if audio connected to this scb AND sco is not opened, open sco */
+        if (p_result->data.audio_handle == bta_ag_scb_to_idx(p_scb) &&
+            !bta_ag_sco_is_open(p_scb)) {
           bta_ag_sco_open(p_scb, (tBTA_AG_DATA*)p_result);
         }
         /* else if no audio at call close sco */
-        else if (p_result->data.audio_handle == BTA_AG_HANDLE_NONE) {
+        else if (p_result->data.audio_handle == BTA_AG_HANDLE_NONE &&
+                 bta_ag_sco_is_open(p_scb)) {
           bta_ag_sco_close(p_scb, (tBTA_AG_DATA*)p_result);
         }
       }
@@ -1435,9 +1450,8 @@ void bta_ag_hfp_result(tBTA_AG_SCB* p_scb, tBTA_AG_API_RESULT* p_result) {
         if (bta_ag_sco_is_open(p_scb) || !bta_ag_inband_enabled(p_scb) ||
             (p_scb->features & BTA_AG_FEAT_NOSCO)) {
           bta_ag_send_ring(p_scb, (tBTA_AG_DATA*)p_result);
-        }
-        /* else open sco, send ring after sco opened */
-        else {
+        } else {
+          /* else open sco, send ring after sco opened */
           p_scb->post_sco = BTA_AG_POST_SCO_RING;
           bta_ag_sco_open(p_scb, (tBTA_AG_DATA*)p_result);
         }
@@ -1453,7 +1467,8 @@ void bta_ag_hfp_result(tBTA_AG_SCB* p_scb, tBTA_AG_API_RESULT* p_result) {
       bta_ag_send_call_inds(p_scb, p_result->result);
 
       if (!(p_scb->features & BTA_AG_FEAT_NOSCO)) {
-        if (p_result->data.audio_handle == bta_ag_scb_to_idx(p_scb)) {
+        if (p_result->data.audio_handle == bta_ag_scb_to_idx(p_scb) &&
+            !bta_ag_sco_is_open(p_scb)) {
           bta_ag_sco_open(p_scb, (tBTA_AG_DATA*)p_result);
         } else if ((p_result->data.audio_handle == BTA_AG_HANDLE_NONE) &&
                    bta_ag_sco_is_open(p_scb)) {
@@ -1654,7 +1669,7 @@ void bta_ag_hfp_result(tBTA_AG_SCB* p_scb, tBTA_AG_API_RESULT* p_result) {
         } else {
           APPL_TRACE_DEBUG(
               "%s HF Indicator %d already %s", p_result->data.ind.id,
-              (p_result->data.ind.on_demand == true) ? "Enabled" : "Disabled");
+              (p_result->data.ind.on_demand) ? "Enabled" : "Disabled");
         }
       }
       break;
@@ -1683,7 +1698,6 @@ void bta_ag_result(tBTA_AG_SCB* p_scb, tBTA_AG_DATA* p_data) {
   }
 }
 
-#if (BTM_WBS_INCLUDED == TRUE)
 /*******************************************************************************
  *
  * Function         bta_ag_send_bcs
@@ -1721,7 +1735,6 @@ void bta_ag_send_bcs(tBTA_AG_SCB* p_scb, tBTA_AG_DATA* p_data) {
   APPL_TRACE_DEBUG("send +BCS codec is %d", codec_uuid);
   bta_ag_send_result(p_scb, BTA_AG_LOCAL_RES_BCS, NULL, codec_uuid);
 }
-#endif
 
 /*******************************************************************************
  *

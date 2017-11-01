@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- *  Copyright (C) 2014 Google, Inc.
+ *  Copyright 2014 Google, Inc.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -18,6 +18,8 @@
 
 #define LOG_TAG "bt_btif_sock"
 
+#include <atomic>
+
 #include <base/logging.h>
 
 #include <hardware/bluetooth.h>
@@ -34,17 +36,18 @@
 #include "btif_util.h"
 #include "osi/include/thread.h"
 
+using bluetooth::Uuid;
+
 static bt_status_t btsock_listen(btsock_type_t type, const char* service_name,
-                                 const uint8_t* uuid, int channel, int* sock_fd,
+                                 const Uuid* uuid, int channel, int* sock_fd,
                                  int flags, int app_uid);
-static bt_status_t btsock_connect(const bt_bdaddr_t* bd_addr,
-                                  btsock_type_t type, const uint8_t* uuid,
-                                  int channel, int* sock_fd, int flags,
-                                  int app_uid);
+static bt_status_t btsock_connect(const RawAddress* bd_addr, btsock_type_t type,
+                                  const Uuid* uuid, int channel, int* sock_fd,
+                                  int flags, int app_uid);
 
 static void btsock_signaled(int fd, int type, int flags, uint32_t user_id);
 
-static int thread_handle = -1;
+static std::atomic_int thread_handle{-1};
 static thread_t* thread;
 
 btsock_interface_t* btif_sock_get_interface(void) {
@@ -107,24 +110,21 @@ error:;
 }
 
 void btif_sock_cleanup(void) {
-  if (thread_handle == -1) return;
+  int saved_handle = thread_handle;
+  if (std::atomic_exchange(&thread_handle, -1) == -1) return;
 
-  thread_stop(thread);
-  thread_join(thread);
-  btsock_thread_exit(thread_handle);
+  btsock_thread_exit(saved_handle);
   btsock_rfc_cleanup();
   btsock_sco_cleanup();
   btsock_l2cap_cleanup();
   thread_free(thread);
-  thread_handle = -1;
   thread = NULL;
 }
 
 static bt_status_t btsock_listen(btsock_type_t type, const char* service_name,
-                                 const uint8_t* service_uuid, int channel,
+                                 const Uuid* service_uuid, int channel,
                                  int* sock_fd, int flags, int app_uid) {
   if ((flags & BTSOCK_FLAG_NO_SDP) == 0) {
-    CHECK(service_uuid != NULL || channel > 0);
     CHECK(sock_fd != NULL);
   }
 
@@ -154,11 +154,9 @@ static bt_status_t btsock_listen(btsock_type_t type, const char* service_name,
   return status;
 }
 
-static bt_status_t btsock_connect(const bt_bdaddr_t* bd_addr,
-                                  btsock_type_t type, const uint8_t* uuid,
-                                  int channel, int* sock_fd, int flags,
-                                  int app_uid) {
-  CHECK(uuid != NULL || channel > 0);
+static bt_status_t btsock_connect(const RawAddress* bd_addr, btsock_type_t type,
+                                  const Uuid* uuid, int channel, int* sock_fd,
+                                  int flags, int app_uid) {
   CHECK(bd_addr != NULL);
   CHECK(sock_fd != NULL);
 

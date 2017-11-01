@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- *  Copyright (C) 2016 Google Inc.
+ *  Copyright 2016 Google Inc.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -32,8 +32,6 @@ using base::Bind;
 using base::Owned;
 using std::vector;
 
-extern bt_status_t do_in_jni_thread(const base::Closure& task);
-
 namespace {
 
 template <typename T>
@@ -61,20 +59,40 @@ static inline OwnedArrayWrapper<T> OwnedArray(T* o) {
   return OwnedArrayWrapper<T>(o);
 }
 
+void parseParams(tBTM_BLE_ADV_PARAMS* p_params,
+                 const AdvertiseParameters& params) {
+  p_params->advertising_event_properties = params.advertising_event_properties;
+  p_params->adv_int_min = params.min_interval;
+  p_params->adv_int_max = params.max_interval;
+  p_params->channel_map = params.channel_map;
+  p_params->adv_filter_policy = 0;
+  p_params->tx_power = params.tx_power;
+  p_params->primary_advertising_phy = params.primary_advertising_phy;
+  p_params->secondary_advertising_phy = params.secondary_advertising_phy;
+  p_params->scan_request_notification_enable =
+      params.scan_request_notification_enable;
+}
+
+void parsePeriodicParams(tBLE_PERIODIC_ADV_PARAMS* p_periodic_params,
+                         PeriodicAdvertisingParameters periodic_params) {
+  p_periodic_params->enable = periodic_params.enable;
+  p_periodic_params->min_interval = periodic_params.min_interval;
+  p_periodic_params->max_interval = periodic_params.max_interval;
+  p_periodic_params->periodic_advertising_properties =
+      periodic_params.periodic_advertising_properties;
+}
+
 class BleAdvertiserInterfaceImpl : public BleAdvertiserInterface {
   ~BleAdvertiserInterfaceImpl(){};
 
-  void RegisterAdvertiserCb(
-      base::Callback<void(uint8_t /* adv_id */, uint8_t /* status */)> cb,
-      uint8_t advertiser_id, uint8_t status) {
+  void RegisterAdvertiserCb(IdStatusCallback cb, uint8_t advertiser_id,
+                            uint8_t status) {
     LOG(INFO) << __func__ << " status: " << +status
               << " , adveriser_id: " << +advertiser_id;
     do_in_jni_thread(Bind(cb, advertiser_id, status));
   }
 
-  void RegisterAdvertiser(
-      base::Callback<void(uint8_t /* advertiser_id */, uint8_t /* status */)>
-          cb) override {
+  void RegisterAdvertiser(IdStatusCallback cb) override {
     do_in_bta_thread(
         FROM_HERE, Bind(&BleAdvertisingManager::RegisterAdvertiser,
                         base::Unretained(BleAdvertisingManager::Get()),
@@ -85,65 +103,50 @@ class BleAdvertiserInterfaceImpl : public BleAdvertiserInterface {
   void Unregister(uint8_t advertiser_id) override {
     do_in_bta_thread(
         FROM_HERE,
-        Bind(&BleAdvertisingManager::Unregister,
-             base::Unretained(BleAdvertisingManager::Get()), advertiser_id));
+        Bind(
+            [](uint8_t advertiser_id) {
+              if (!BleAdvertisingManager::IsInitialized()) {
+                LOG(WARNING) << "Stack already shutdown";
+                return;
+              }
+              BleAdvertisingManager::Get()->Unregister(advertiser_id);
+            },
+            advertiser_id));
   }
 
-  void SetParametersCb(Callback cb, uint8_t status) {
-    LOG(INFO) << __func__ << " status: " << +status;
-    do_in_jni_thread(Bind(cb, status));
-  }
-
-  void SetParameters(uint8_t advertiser_id,
-                     uint16_t advertising_event_properties,
-                     uint32_t min_interval, uint32_t max_interval, int chnl_map,
-                     int tx_power, uint8_t primary_advertising_phy,
-                     uint8_t secondary_advertising_phy,
-                     uint8_t scan_request_notification_enable, Callback cb) {
-    tBTM_BLE_ADV_PARAMS* params = new tBTM_BLE_ADV_PARAMS;
-
-    params->advertising_event_properties = advertising_event_properties;
-    params->adv_int_min = min_interval;
-    params->adv_int_max = max_interval;
-    params->channel_map = chnl_map;
-    params->adv_filter_policy = 0;
-    params->tx_power = tx_power;
-    params->primary_advertising_phy = primary_advertising_phy;
-    params->secondary_advertising_phy = secondary_advertising_phy;
-    params->scan_request_notification_enable = scan_request_notification_enable;
-
+  void GetOwnAddress(uint8_t advertiser_id, GetAddressCallback cb) override {
     do_in_bta_thread(FROM_HERE,
-                     Bind(&BleAdvertisingManager::SetParameters,
+                     Bind(&BleAdvertisingManager::GetOwnAddress,
                           base::Unretained(BleAdvertisingManager::Get()),
-                          advertiser_id, base::Owned(params),
-                          Bind(&BleAdvertiserInterfaceImpl::SetParametersCb,
-                               base::Unretained(this), cb)));
+                          advertiser_id, jni_thread_wrapper(FROM_HERE, cb)));
   }
 
-  void SetDataCb(Callback cb, uint8_t advertiser_id, uint8_t status) {
-    do_in_jni_thread(Bind(cb, status));
+  void SetParameters(uint8_t advertiser_id, AdvertiseParameters params,
+                     ParametersCallback cb) override {
+    VLOG(1) << __func__;
+
+    tBTM_BLE_ADV_PARAMS* p_params = new tBTM_BLE_ADV_PARAMS;
+    parseParams(p_params, params);
+
+    do_in_bta_thread(
+        FROM_HERE,
+        Bind(&BleAdvertisingManager::SetParameters,
+             base::Unretained(BleAdvertisingManager::Get()), advertiser_id,
+             base::Owned(p_params), jni_thread_wrapper(FROM_HERE, cb)));
   }
 
   void SetData(int advertiser_id, bool set_scan_rsp, vector<uint8_t> data,
-               Callback cb) override {
-    do_in_bta_thread(FROM_HERE,
-                     Bind(&BleAdvertisingManager::SetData,
-                          base::Unretained(BleAdvertisingManager::Get()),
-                          advertiser_id, set_scan_rsp, std::move(data),
-                          Bind(&BleAdvertiserInterfaceImpl::SetDataCb,
-                               base::Unretained(this), cb, advertiser_id)));
+               StatusCallback cb) override {
+    do_in_bta_thread(
+        FROM_HERE,
+        Bind(&BleAdvertisingManager::SetData,
+             base::Unretained(BleAdvertisingManager::Get()), advertiser_id,
+             set_scan_rsp, std::move(data), jni_thread_wrapper(FROM_HERE, cb)));
   }
 
-  void EnableTimeoutCb(Callback cb, uint8_t status) {
-    do_in_jni_thread(Bind(cb, status));
-  }
-
-  void EnableCb(Callback cb, uint8_t status) {
-    do_in_jni_thread(Bind(cb, status));
-  }
-
-  void Enable(uint8_t advertiser_id, bool enable, Callback cb, int timeout_s,
-              Callback timeout_cb) override {
+  void Enable(uint8_t advertiser_id, bool enable, StatusCallback cb,
+              uint16_t duration, uint8_t maxExtAdvEvents,
+              StatusCallback timeout_cb) override {
     VLOG(1) << __func__ << " advertiser_id: " << +advertiser_id
             << " ,enable: " << enable;
 
@@ -151,13 +154,11 @@ class BleAdvertiserInterfaceImpl : public BleAdvertiserInterface {
         FROM_HERE,
         Bind(&BleAdvertisingManager::Enable,
              base::Unretained(BleAdvertisingManager::Get()), advertiser_id,
-             enable, Bind(&BleAdvertiserInterfaceImpl::EnableCb,
-                          base::Unretained(this), cb),
-             timeout_s, Bind(&BleAdvertiserInterfaceImpl::EnableTimeoutCb,
-                             base::Unretained(this), timeout_cb)));
+             enable, jni_thread_wrapper(FROM_HERE, cb), duration,
+             maxExtAdvEvents, jni_thread_wrapper(FROM_HERE, timeout_cb)));
   }
 
-  void StartAdvertising(uint8_t advertiser_id, Callback cb,
+  void StartAdvertising(uint8_t advertiser_id, StatusCallback cb,
                         AdvertiseParameters params,
                         std::vector<uint8_t> advertise_data,
                         std::vector<uint8_t> scan_response_data, int timeout_s,
@@ -165,28 +166,80 @@ class BleAdvertiserInterfaceImpl : public BleAdvertiserInterface {
     VLOG(1) << __func__;
 
     tBTM_BLE_ADV_PARAMS* p_params = new tBTM_BLE_ADV_PARAMS;
-    p_params->advertising_event_properties =
-        params.advertising_event_properties;
-    p_params->adv_int_min = params.min_interval;
-    p_params->adv_int_max = params.max_interval;
-    p_params->channel_map = params.channel_map;
-    p_params->adv_filter_policy = 0;
-    p_params->tx_power = params.tx_power;
-    p_params->primary_advertising_phy = params.primary_advertising_phy;
-    p_params->secondary_advertising_phy = params.secondary_advertising_phy;
-    p_params->scan_request_notification_enable =
-        params.scan_request_notification_enable;
+    parseParams(p_params, params);
 
     do_in_bta_thread(
-        FROM_HERE, Bind(&BleAdvertisingManager::StartAdvertising,
-                        base::Unretained(BleAdvertisingManager::Get()),
-                        advertiser_id, base::Bind(
-                                           [](Callback cb, uint8_t status) {
-                                             do_in_jni_thread(Bind(cb, status));
-                                           },
-                                           cb),
-                        base::Owned(p_params), std::move(advertise_data),
-                        std::move(scan_response_data), timeout_s, timeout_cb));
+        FROM_HERE,
+        Bind(&BleAdvertisingManager::StartAdvertising,
+             base::Unretained(BleAdvertisingManager::Get()), advertiser_id,
+             jni_thread_wrapper(FROM_HERE, cb), base::Owned(p_params),
+             std::move(advertise_data), std::move(scan_response_data),
+             timeout_s * 100, jni_thread_wrapper(FROM_HERE, timeout_cb)));
+  }
+
+  void StartAdvertisingSet(IdTxPowerStatusCallback cb,
+                           AdvertiseParameters params,
+                           std::vector<uint8_t> advertise_data,
+                           std::vector<uint8_t> scan_response_data,
+                           PeriodicAdvertisingParameters periodic_params,
+                           std::vector<uint8_t> periodic_data,
+                           uint16_t duration, uint8_t maxExtAdvEvents,
+                           IdStatusCallback timeout_cb) override {
+    VLOG(1) << __func__;
+
+    tBTM_BLE_ADV_PARAMS* p_params = new tBTM_BLE_ADV_PARAMS;
+    parseParams(p_params, params);
+
+    tBLE_PERIODIC_ADV_PARAMS* p_periodic_params = new tBLE_PERIODIC_ADV_PARAMS;
+    parsePeriodicParams(p_periodic_params, periodic_params);
+
+    do_in_bta_thread(
+        FROM_HERE,
+        Bind(&BleAdvertisingManager::StartAdvertisingSet,
+             base::Unretained(BleAdvertisingManager::Get()),
+             jni_thread_wrapper(FROM_HERE, cb), base::Owned(p_params),
+             std::move(advertise_data), std::move(scan_response_data),
+             base::Owned(p_periodic_params), std::move(periodic_data), duration,
+             maxExtAdvEvents, jni_thread_wrapper(FROM_HERE, timeout_cb)));
+  }
+
+  void SetPeriodicAdvertisingParameters(
+      int advertiser_id, PeriodicAdvertisingParameters periodic_params,
+      StatusCallback cb) override {
+    VLOG(1) << __func__ << " advertiser_id: " << +advertiser_id;
+
+    tBLE_PERIODIC_ADV_PARAMS* p_periodic_params = new tBLE_PERIODIC_ADV_PARAMS;
+    parsePeriodicParams(p_periodic_params, periodic_params);
+
+    do_in_bta_thread(
+        FROM_HERE,
+        Bind(&BleAdvertisingManager::SetPeriodicAdvertisingParameters,
+             base::Unretained(BleAdvertisingManager::Get()), advertiser_id,
+             base::Owned(p_periodic_params),
+             jni_thread_wrapper(FROM_HERE, cb)));
+  }
+
+  void SetPeriodicAdvertisingData(int advertiser_id, std::vector<uint8_t> data,
+                                  StatusCallback cb) override {
+    VLOG(1) << __func__ << " advertiser_id: " << +advertiser_id;
+
+    do_in_bta_thread(
+        FROM_HERE,
+        Bind(&BleAdvertisingManager::SetPeriodicAdvertisingData,
+             base::Unretained(BleAdvertisingManager::Get()), advertiser_id,
+             std::move(data), jni_thread_wrapper(FROM_HERE, cb)));
+  }
+
+  void SetPeriodicAdvertisingEnable(int advertiser_id, bool enable,
+                                    StatusCallback cb) override {
+    VLOG(1) << __func__ << " advertiser_id: " << +advertiser_id
+            << " ,enable: " << enable;
+
+    do_in_bta_thread(
+        FROM_HERE,
+        Bind(&BleAdvertisingManager::SetPeriodicAdvertisingEnable,
+             base::Unretained(BleAdvertisingManager::Get()), advertiser_id,
+             enable, jni_thread_wrapper(FROM_HERE, cb)));
   }
 };
 

@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- *  Copyright (C) 1999-2014 Broadcom Corporation
+ *  Copyright 1999-2014 Broadcom Corporation
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -34,6 +34,7 @@
 #include "osi/include/osi.h"
 #include "osi/include/time.h"
 
+#include "advertise_data_parser.h"
 #include "bt_common.h"
 #include "bt_types.h"
 #include "btm_api.h"
@@ -42,6 +43,8 @@
 #include "hcidefs.h"
 #include "hcimsgs.h"
 
+using bluetooth::Uuid;
+
 /* 3 second timeout waiting for responses */
 #define BTM_INQ_REPLY_TIMEOUT_MS (3 * 1000)
 
@@ -49,8 +52,6 @@
 #ifndef BTM_INQ_DEBUG
 #define BTM_INQ_DEBUG FALSE
 #endif
-
-extern fixed_queue_t* btu_general_alarm_queue;
 
 /******************************************************************************/
 /*               L O C A L    D A T A    D E F I N I T I O N S                */
@@ -118,10 +119,10 @@ static void btm_clr_inq_result_flt(void);
 
 static uint8_t btm_convert_uuid_to_eir_service(uint16_t uuid16);
 static void btm_set_eir_uuid(uint8_t* p_eir, tBTM_INQ_RESULTS* p_results);
-static uint8_t* btm_eir_get_uuid_list(uint8_t* p_eir, uint8_t uuid_size,
-                                      uint8_t* p_num_uuid,
-                                      uint8_t* p_uuid_list_type);
-static uint16_t btm_convert_uuid_to_uuid16(uint8_t* p_uuid, uint8_t uuid_size);
+static const uint8_t* btm_eir_get_uuid_list(uint8_t* p_eir, size_t eir_len,
+                                            uint8_t uuid_size,
+                                            uint8_t* p_num_uuid,
+                                            uint8_t* p_uuid_list_type);
 
 /*******************************************************************************
  *
@@ -762,8 +763,8 @@ tBTM_STATUS BTM_StartInquiry(tBTM_INQ_PARMS* p_inqparms,
       btm_cb.ble_ctr_cb.inq_var.scan_type = BTM_BLE_SCAN_MODE_NONE;
       btm_send_hci_scan_enable(BTM_BLE_SCAN_DISABLE, BTM_BLE_DUPLICATE_ENABLE);
     } else {
-      return (BTM_BUSY);
       BTM_TRACE_API("BTM_StartInquiry: return BUSY");
+      return (BTM_BUSY);
     }
   } else
     p_inq->scan_type = INQ_GENERAL;
@@ -951,34 +952,17 @@ tBTM_STATUS BTM_StartInquiry(tBTM_INQ_PARMS* p_inqparms,
  *                  BTM_WRONG_MODE if the device is not up.
  *
  ******************************************************************************/
-tBTM_STATUS BTM_ReadRemoteDeviceName(BD_ADDR remote_bda, tBTM_CMPL_CB* p_cb,
+tBTM_STATUS BTM_ReadRemoteDeviceName(const RawAddress& remote_bda,
+                                     tBTM_CMPL_CB* p_cb,
                                      tBT_TRANSPORT transport) {
-  tBTM_INQ_INFO* p_cur = NULL;
-  tINQ_DB_ENT* p_i;
-
-  BTM_TRACE_API("BTM_ReadRemoteDeviceName: bd addr [%02x%02x%02x%02x%02x%02x]",
-                remote_bda[0], remote_bda[1], remote_bda[2], remote_bda[3],
-                remote_bda[4], remote_bda[5]);
-
-  /* Use the remote device's clock offset if it is in the local inquiry database
-   */
-  p_i = btm_inq_db_find(remote_bda);
-  if (p_i != NULL) {
-    p_cur = &p_i->inq_info;
-    if ((p_cur->results.ble_evt_type == BTM_BLE_EVT_NON_CONN_ADV) &&
-        (p_cur->results.device_type !=
-         BT_DEVICE_TYPE_BREDR)) { /* Non-connectable LE device: do not request
-                                     its name! */
-      return BTM_ERR_PROCESSING;
-    }
-  }
-  BTM_TRACE_API("no device found in inquiry db");
-
+  VLOG(1) << __func__ << ": bd addr " << remote_bda;
+  /* Use LE transport when LE is the only available option */
   if (transport == BT_TRANSPORT_LE) {
-    return btm_ble_read_remote_name(remote_bda, p_cur, p_cb);
-  } else
-    return (btm_initiate_rem_name(remote_bda, p_cur, BTM_RMT_NAME_EXT,
-                                  BTM_EXT_RMT_NAME_TIMEOUT_MS, p_cb));
+    return btm_ble_read_remote_name(remote_bda, p_cb);
+  }
+  /* Use classic transport for BR/EDR and Dual Mode devices */
+  return btm_initiate_rem_name(remote_bda, BTM_RMT_NAME_EXT,
+                               BTM_EXT_RMT_NAME_TIMEOUT_MS, p_cb);
 }
 
 /*******************************************************************************
@@ -1030,9 +1014,8 @@ tBTM_STATUS BTM_CancelRemoteDeviceName(void) {
  * Returns          pointer to entry, or NULL if not found
  *
  ******************************************************************************/
-tBTM_INQ_INFO* BTM_InqDbRead(const BD_ADDR p_bda) {
-  BTM_TRACE_API("BTM_InqDbRead: bd addr [%02x%02x%02x%02x%02x%02x]", p_bda[0],
-                p_bda[1], p_bda[2], p_bda[3], p_bda[4], p_bda[5]);
+tBTM_INQ_INFO* BTM_InqDbRead(const RawAddress& p_bda) {
+  VLOG(1) << __func__ << ": bd addr " << p_bda;
 
   tINQ_DB_ENT* p_ent = btm_inq_db_find(p_bda);
   if (!p_ent) return NULL;
@@ -1109,7 +1092,7 @@ tBTM_INQ_INFO* BTM_InqDbNext(tBTM_INQ_INFO* p_cur) {
  *                          is active, otherwise BTM_SUCCESS
  *
  ******************************************************************************/
-tBTM_STATUS BTM_ClearInqDb(BD_ADDR p_bda) {
+tBTM_STATUS BTM_ClearInqDb(const RawAddress* p_bda) {
   tBTM_INQUIRY_VAR_ST* p_inq = &btm_cb.btm_inq_vars;
 
   /* If an inquiry or remote name is in progress return busy */
@@ -1136,9 +1119,9 @@ tBTM_STATUS BTM_ReadInquiryRspTxPower(tBTM_CMPL_CB* p_cb) {
   if (btm_cb.devcb.p_inq_tx_power_cmpl_cb) return (BTM_BUSY);
 
   btm_cb.devcb.p_inq_tx_power_cmpl_cb = p_cb;
-  alarm_set_on_queue(btm_cb.devcb.read_inq_tx_power_timer,
+  alarm_set_on_mloop(btm_cb.devcb.read_inq_tx_power_timer,
                      BTM_INQ_REPLY_TIMEOUT_MS, btm_read_inq_tx_power_timeout,
-                     NULL, btu_general_alarm_queue);
+                     NULL);
 
   btsnd_hcic_read_inq_tx_power();
   return (BTM_CMD_STARTED);
@@ -1190,7 +1173,7 @@ void btm_inq_db_reset(void) {
   if (p_inq->remname_active) {
     alarm_cancel(p_inq->remote_name_timer);
     p_inq->remname_active = false;
-    memset(p_inq->remname_bda, 0, BD_ADDR_LEN);
+    p_inq->remname_bda = RawAddress::kEmpty;
 
     if (p_inq->p_remname_cmpl_cb) {
       rem_name.status = BTM_DEV_RESET;
@@ -1305,7 +1288,7 @@ void btm_inq_clear_ssp(void) {
  * Returns          void
  *
  ******************************************************************************/
-void btm_clr_inq_db(BD_ADDR p_bda) {
+void btm_clr_inq_db(const RawAddress* p_bda) {
   tBTM_INQUIRY_VAR_ST* p_inq = &btm_cb.btm_inq_vars;
   tINQ_DB_ENT* p_ent = p_inq->inq_db;
   uint16_t xx;
@@ -1317,8 +1300,7 @@ void btm_clr_inq_db(BD_ADDR p_bda) {
   for (xx = 0; xx < BTM_INQ_DB_SIZE; xx++, p_ent++) {
     if (p_ent->in_use) {
       /* If this is the specified BD_ADDR or clearing all devices */
-      if (p_bda == NULL || (!memcmp(p_ent->inq_info.results.remote_bd_addr,
-                                    p_bda, BD_ADDR_LEN))) {
+      if (p_bda == NULL || (p_ent->inq_info.results.remote_bd_addr == *p_bda)) {
         p_ent->in_use = false;
       }
     }
@@ -1357,7 +1339,7 @@ static void btm_clr_inq_result_flt(void) {
  * Returns          true if found, else false (new entry)
  *
  ******************************************************************************/
-bool btm_inq_find_bdaddr(BD_ADDR p_bda) {
+bool btm_inq_find_bdaddr(const RawAddress& p_bda) {
   tBTM_INQUIRY_VAR_ST* p_inq = &btm_cb.btm_inq_vars;
   tINQ_BDADDR* p_db = &p_inq->p_bd_db[0];
   uint16_t xx;
@@ -1367,14 +1349,13 @@ bool btm_inq_find_bdaddr(BD_ADDR p_bda) {
     return (false);
 
   for (xx = 0; xx < p_inq->num_bd_entries; xx++, p_db++) {
-    if (!memcmp(p_db->bd_addr, p_bda, BD_ADDR_LEN) &&
-        p_db->inq_count == p_inq->inq_counter)
+    if (p_db->bd_addr == p_bda && p_db->inq_count == p_inq->inq_counter)
       return (true);
   }
 
   if (xx < p_inq->max_bd_entries) {
     p_db->inq_count = p_inq->inq_counter;
-    memcpy(p_db->bd_addr, p_bda, BD_ADDR_LEN);
+    p_db->bd_addr = p_bda;
     p_inq->num_bd_entries++;
   }
 
@@ -1392,13 +1373,12 @@ bool btm_inq_find_bdaddr(BD_ADDR p_bda) {
  * Returns          pointer to entry, or NULL if not found
  *
  ******************************************************************************/
-tINQ_DB_ENT* btm_inq_db_find(const BD_ADDR p_bda) {
+tINQ_DB_ENT* btm_inq_db_find(const RawAddress& p_bda) {
   uint16_t xx;
   tINQ_DB_ENT* p_ent = btm_cb.btm_inq_vars.inq_db;
 
   for (xx = 0; xx < BTM_INQ_DB_SIZE; xx++, p_ent++) {
-    if ((p_ent->in_use) &&
-        (!memcmp(p_ent->inq_info.results.remote_bd_addr, p_bda, BD_ADDR_LEN)))
+    if (p_ent->in_use && p_ent->inq_info.results.remote_bd_addr == p_bda)
       return (p_ent);
   }
 
@@ -1417,7 +1397,7 @@ tINQ_DB_ENT* btm_inq_db_find(const BD_ADDR p_bda) {
  * Returns          pointer to entry
  *
  ******************************************************************************/
-tINQ_DB_ENT* btm_inq_db_new(BD_ADDR p_bda) {
+tINQ_DB_ENT* btm_inq_db_new(const RawAddress& p_bda) {
   uint16_t xx;
   tINQ_DB_ENT* p_ent = btm_cb.btm_inq_vars.inq_db;
   tINQ_DB_ENT* p_old = btm_cb.btm_inq_vars.inq_db;
@@ -1426,7 +1406,7 @@ tINQ_DB_ENT* btm_inq_db_new(BD_ADDR p_bda) {
   for (xx = 0; xx < BTM_INQ_DB_SIZE; xx++, p_ent++) {
     if (!p_ent->in_use) {
       memset(p_ent, 0, sizeof(tINQ_DB_ENT));
-      memcpy(p_ent->inq_info.results.remote_bd_addr, p_bda, BD_ADDR_LEN);
+      p_ent->inq_info.results.remote_bd_addr = p_bda;
       p_ent->in_use = true;
 
       return (p_ent);
@@ -1441,7 +1421,7 @@ tINQ_DB_ENT* btm_inq_db_new(BD_ADDR p_bda) {
   /* If here, no free entry found. Return the oldest. */
 
   memset(p_old, 0, sizeof(tINQ_DB_ENT));
-  memcpy(p_old->inq_info.results.remote_bd_addr, p_bda, BD_ADDR_LEN);
+  p_old->inq_info.results.remote_bd_addr = p_bda;
   p_old->in_use = true;
 
   return (p_old);
@@ -1482,11 +1462,7 @@ static tBTM_STATUS btm_set_inq_event_filter(uint8_t filter_cond_type,
   BTM_TRACE_DEBUG(
       "btm_set_inq_event_filter: filter type %d [Clear-0, COD-1, BDADDR-2]",
       filter_cond_type);
-  BTM_TRACE_DEBUG(
-      "                       condition [%02x%02x%02x %02x%02x%02x]",
-      p_filt_cond->bdaddr_cond[0], p_filt_cond->bdaddr_cond[1],
-      p_filt_cond->bdaddr_cond[2], p_filt_cond->bdaddr_cond[3],
-      p_filt_cond->bdaddr_cond[4], p_filt_cond->bdaddr_cond[5]);
+  VLOG(2) << "condition " << p_filt_cond->bdaddr_cond;
 #endif
 
   /* Load the correct filter condition to pass to the lower layer */
@@ -1502,7 +1478,7 @@ static tBTM_STATUS btm_set_inq_event_filter(uint8_t filter_cond_type,
       break;
 
     case BTM_FILTER_COND_BD_ADDR:
-      p_cond = p_filt_cond->bdaddr_cond;
+      p_cond = (uint8_t*)&p_filt_cond->bdaddr_cond;
 
       /* condition length should already be set as the default */
       break;
@@ -1556,7 +1532,7 @@ void btm_event_filter_complete(uint8_t* p) {
 
   /* Only process the inquiry filter; Ignore the connection filter until it
      is used by the upper layers */
-  if (p_inq->inqfilt_active == true) {
+  if (p_inq->inqfilt_active) {
     /* Extract the returned status from the buffer */
     STREAM_TO_UINT8(hci_status, p);
     if (hci_status != HCI_SUCCESS) {
@@ -1705,7 +1681,7 @@ static void btm_initiate_inquiry(tBTM_INQUIRY_VAR_ST* p_inq) {
  ******************************************************************************/
 void btm_process_inq_results(uint8_t* p, uint8_t inq_res_mode) {
   uint8_t num_resp, xx;
-  BD_ADDR bda;
+  RawAddress bda;
   tINQ_DB_ENT* p_i;
   tBTM_INQ_RESULTS* p_cur = NULL;
   bool is_new = true;
@@ -1828,7 +1804,7 @@ void btm_process_inq_results(uint8_t* p, uint8_t inq_res_mode) {
     else
       p_i->inq_info.results.rssi = BTM_INQ_RES_IGNORE_RSSI;
 
-    if (is_new == true) {
+    if (is_new) {
       /* Save the info */
       p_cur = &p_i->inq_info.results;
       p_cur->page_scan_rep_mode = page_scan_rep_mode;
@@ -1885,7 +1861,7 @@ void btm_process_inq_results(uint8_t* p, uint8_t inq_res_mode) {
 
       /* If a callback is registered, call it with the results */
       if (p_inq_results_cb)
-        (p_inq_results_cb)((tBTM_INQ_RESULTS*)p_cur, p_eir_data);
+        (p_inq_results_cb)((tBTM_INQ_RESULTS*)p_cur, p_eir_data, 62);
     }
   }
 }
@@ -2062,9 +2038,7 @@ void btm_process_cancel_complete(uint8_t status, uint8_t mode) {
  *                  called either by GAP or by the API call
  *                  BTM_ReadRemoteDeviceName.
  *
- * Input Params:    p_cur         - pointer to an inquiry result structure
- *                                  (NULL if nonexistent)
- *                  p_cb            - callback function called when
+ * Input Params:    p_cb            - callback function called when
  *                                    BTM_CMD_STARTED is returned.
  *                                    A pointer to tBTM_REMOTE_DEV_NAME is
  *                                    passed to the callback.
@@ -2077,9 +2051,8 @@ void btm_process_cancel_complete(uint8_t status, uint8_t mode) {
  *                  BTM_WRONG_MODE if the device is not up.
  *
  ******************************************************************************/
-tBTM_STATUS btm_initiate_rem_name(BD_ADDR remote_bda, tBTM_INQ_INFO* p_cur,
-                                  uint8_t origin, period_ms_t timeout_ms,
-                                  tBTM_CMPL_CB* p_cb) {
+tBTM_STATUS btm_initiate_rem_name(const RawAddress& remote_bda, uint8_t origin,
+                                  period_ms_t timeout_ms, tBTM_CMPL_CB* p_cb) {
   tBTM_INQUIRY_VAR_ST* p_inq = &btm_cb.btm_inq_vars;
 
   /*** Make sure the device is ready ***/
@@ -2099,20 +2072,21 @@ tBTM_STATUS btm_initiate_rem_name(BD_ADDR remote_bda, tBTM_INQ_INFO* p_cur,
       /* If there is no remote name request running,call the callback function
        * and start timer */
       p_inq->p_remname_cmpl_cb = p_cb;
-      memcpy(p_inq->remname_bda, remote_bda, BD_ADDR_LEN);
+      p_inq->remname_bda = remote_bda;
 
-      alarm_set_on_queue(p_inq->remote_name_timer, timeout_ms,
-                         btm_inq_remote_name_timer_timeout, NULL,
-                         btu_general_alarm_queue);
+      alarm_set_on_mloop(p_inq->remote_name_timer, timeout_ms,
+                         btm_inq_remote_name_timer_timeout, NULL);
 
       /* If the database entry exists for the device, use its clock offset */
-      if (p_cur) {
+      tINQ_DB_ENT* p_i = btm_inq_db_find(remote_bda);
+      if (p_i) {
+        tBTM_INQ_INFO* p_cur = &p_i->inq_info;
         btsnd_hcic_rmt_name_req(
             remote_bda, p_cur->results.page_scan_rep_mode,
             p_cur->results.page_scan_mode,
             (uint16_t)(p_cur->results.clock_offset | BTM_CLOCK_OFFSET_VALID));
-      } else /* Otherwise use defaults and mark the clock offset as invalid */
-      {
+      } else {
+        /* Otherwise use defaults and mark the clock offset as invalid */
         btsnd_hcic_rmt_name_req(remote_bda, HCI_PAGE_SCAN_REP_MODE_R1,
                                 HCI_MANDATARY_PAGE_SCAN_MODE, 0);
       }
@@ -2136,8 +2110,8 @@ tBTM_STATUS btm_initiate_rem_name(BD_ADDR remote_bda, tBTM_INQ_INFO* p_cur,
  * Returns          void
  *
  ******************************************************************************/
-void btm_process_remote_name(BD_ADDR bda, BD_NAME bdn, uint16_t evt_len,
-                             uint8_t hci_status) {
+void btm_process_remote_name(const RawAddress* bda, BD_NAME bdn,
+                             uint16_t evt_len, uint8_t hci_status) {
   tBTM_REMOTE_DEV_NAME rem_name;
   tBTM_INQUIRY_VAR_ST* p_inq = &btm_cb.btm_inq_vars;
   tBTM_CMPL_CB* p_cb = p_inq->p_remname_cmpl_cb;
@@ -2145,23 +2119,15 @@ void btm_process_remote_name(BD_ADDR bda, BD_NAME bdn, uint16_t evt_len,
 
   uint16_t temp_evt_len;
 
-  if (bda != NULL) {
-    BTM_TRACE_EVENT("BDA %02x:%02x:%02x:%02x:%02x:%02x", bda[0], bda[1], bda[2],
-                    bda[3], bda[4], bda[5]);
+  if (bda) {
+    VLOG(2) << "BDA " << *bda;
   }
 
-  BTM_TRACE_EVENT("Inquire BDA %02x:%02x:%02x:%02x:%02x:%02x",
-                  p_inq->remname_bda[0], p_inq->remname_bda[1],
-                  p_inq->remname_bda[2], p_inq->remname_bda[3],
-                  p_inq->remname_bda[4], p_inq->remname_bda[5]);
+  VLOG(2) << "Inquire BDA " << p_inq->remname_bda;
 
   /* If the inquire BDA and remote DBA are the same, then stop the timer and set
    * the active to false */
-  if ((p_inq->remname_active == true) &&
-      (((bda != NULL) && (memcmp(bda, p_inq->remname_bda, BD_ADDR_LEN) == 0)) ||
-       bda == NULL))
-
-  {
+  if ((p_inq->remname_active) && (!bda || (*bda == p_inq->remname_bda))) {
     if (BTM_UseLeLink(p_inq->remname_bda)) {
       if (hci_status == HCI_ERR_UNSPECIFIED)
         btm_ble_cancel_remote_name(p_inq->remname_bda);
@@ -2197,10 +2163,10 @@ void btm_process_remote_name(BD_ADDR bda, BD_NAME bdn, uint16_t evt_len,
       rem_name.remote_bd_name[0] = 0;
     }
     /* Reset the remote BAD to zero and call callback if possible */
-    memset(p_inq->remname_bda, 0, BD_ADDR_LEN);
+    p_inq->remname_bda = RawAddress::kEmpty;
 
     p_inq->p_remname_cmpl_cb = NULL;
-    if (p_cb) (p_cb)((tBTM_REMOTE_DEV_NAME*)&rem_name);
+    if (p_cb) (p_cb)(&rem_name);
   }
 }
 
@@ -2224,7 +2190,7 @@ void btm_inq_rmt_name_failed(void) {
                   btm_cb.btm_inq_vars.remname_active);
 
   if (btm_cb.btm_inq_vars.remname_active)
-    btm_process_remote_name(btm_cb.btm_inq_vars.remname_bda, NULL, 0,
+    btm_process_remote_name(&btm_cb.btm_inq_vars.remname_bda, NULL, 0,
                             HCI_ERR_UNSPECIFIED);
   else
     btm_process_remote_name(NULL, NULL, 0, HCI_ERR_UNSPECIFIED);
@@ -2258,7 +2224,7 @@ void btm_read_inq_tx_power_timeout(UNUSED_ATTR void* data) {
  ******************************************************************************/
 void btm_read_inq_tx_power_complete(uint8_t* p) {
   tBTM_CMPL_CB* p_cb = btm_cb.devcb.p_inq_tx_power_cmpl_cb;
-  tBTM_INQ_TXPWR_RESULTS results;
+  tBTM_INQ_TXPWR_RESULT result;
 
   BTM_TRACE_DEBUG("%s", __func__);
   alarm_cancel(btm_cb.devcb.read_inq_tx_power_timer);
@@ -2266,19 +2232,20 @@ void btm_read_inq_tx_power_complete(uint8_t* p) {
 
   /* If there was a registered callback, call it */
   if (p_cb) {
-    STREAM_TO_UINT8(results.hci_status, p);
+    STREAM_TO_UINT8(result.hci_status, p);
 
-    if (results.hci_status == HCI_SUCCESS) {
-      results.status = BTM_SUCCESS;
+    if (result.hci_status == HCI_SUCCESS) {
+      result.status = BTM_SUCCESS;
 
-      STREAM_TO_UINT8(results.tx_power, p);
+      STREAM_TO_UINT8(result.tx_power, p);
       BTM_TRACE_EVENT(
           "BTM INQ TX POWER Complete: tx_power %d, hci status 0x%02x",
-          results.tx_power, results.hci_status);
-    } else
-      results.status = BTM_ERR_PROCESSING;
+          result.tx_power, result.hci_status);
+    } else {
+      result.status = BTM_ERR_PROCESSING;
+    }
 
-    (*p_cb)(&results);
+    (*p_cb)(&result);
   }
 }
 /*******************************************************************************
@@ -2303,42 +2270,6 @@ tBTM_STATUS BTM_WriteEIR(BT_HDR* p_buff) {
     osi_free(p_buff);
     return BTM_MODE_UNSUPPORTED;
   }
-}
-
-/*******************************************************************************
- *
- * Function         BTM_CheckEirData
- *
- * Description      This function is called to get EIR data from significant
- *                  part.
- *
- * Parameters       p_eir - pointer of EIR significant part
- *                  type   - finding EIR data type
- *                  p_length - return the length of EIR data not including type
- *
- * Returns          pointer of EIR data
- *
- ******************************************************************************/
-uint8_t* BTM_CheckEirData(uint8_t* p_eir, uint8_t type, uint8_t* p_length) {
-  uint8_t* p = p_eir;
-  uint8_t length;
-  uint8_t eir_type;
-  BTM_TRACE_API("BTM_CheckEirData type=0x%02X", type);
-
-  STREAM_TO_UINT8(length, p);
-  while (length && (p - p_eir <= HCI_EXT_INQ_RESPONSE_LEN)) {
-    STREAM_TO_UINT8(eir_type, p);
-    if (eir_type == type) {
-      /* length doesn't include itself */
-      *p_length = length - 1; /* minus the length of type */
-      return p;
-    }
-    p += length - 1; /* skip the length of data */
-    STREAM_TO_UINT8(length, p);
-  }
-
-  *p_length = 0;
-  return NULL;
 }
 
 /*******************************************************************************
@@ -2377,7 +2308,7 @@ static uint8_t btm_convert_uuid_to_eir_service(uint16_t uuid16) {
  *                  false - if not found
  *
  ******************************************************************************/
-bool BTM_HasEirService(uint32_t* p_eir_uuid, uint16_t uuid16) {
+bool BTM_HasEirService(const uint32_t* p_eir_uuid, uint16_t uuid16) {
   uint8_t service_id;
 
   service_id = btm_convert_uuid_to_eir_service(uuid16);
@@ -2500,7 +2431,9 @@ uint8_t BTM_GetEirSupportedServices(uint32_t* p_eir_uuid, uint8_t** p,
  * Description      This function parses EIR and returns UUID list.
  *
  * Parameters       p_eir - EIR
- *                  uuid_size - LEN_UUID_16, LEN_UUID_32, LEN_UUID_128
+ *                  eir_len - EIR len
+ *                  uuid_size - Uuid::kNumBytes16, Uuid::kNumBytes32,
+ *                              Uuid::kNumBytes128
  *                  p_num_uuid - return number of UUID in found list
  *                  p_uuid_list - return UUID list
  *                  max_num_uuid - maximum number of UUID to be returned
@@ -2514,47 +2447,47 @@ uint8_t BTM_GetEirSupportedServices(uint32_t* p_eir_uuid, uint8_t** p,
  *                  BTM_EIR_MORE_128BITS_UUID_TYPE
  *
  ******************************************************************************/
-uint8_t BTM_GetEirUuidList(uint8_t* p_eir, uint8_t uuid_size,
+uint8_t BTM_GetEirUuidList(uint8_t* p_eir, size_t eir_len, uint8_t uuid_size,
                            uint8_t* p_num_uuid, uint8_t* p_uuid_list,
                            uint8_t max_num_uuid) {
-  uint8_t* p_uuid_data;
+  const uint8_t* p_uuid_data;
   uint8_t type;
   uint8_t yy, xx;
   uint16_t* p_uuid16 = (uint16_t*)p_uuid_list;
   uint32_t* p_uuid32 = (uint32_t*)p_uuid_list;
-  char buff[LEN_UUID_128 * 2 + 1];
+  char buff[Uuid::kNumBytes128 * 2 + 1];
 
-  p_uuid_data = btm_eir_get_uuid_list(p_eir, uuid_size, p_num_uuid, &type);
+  p_uuid_data =
+      btm_eir_get_uuid_list(p_eir, eir_len, uuid_size, p_num_uuid, &type);
   if (p_uuid_data == NULL) {
     return 0x00;
   }
 
   if (*p_num_uuid > max_num_uuid) {
-    BTM_TRACE_WARNING(
-        "BTM_GetEirUuidList number of uuid in EIR = %d, size of uuid list = %d",
-        *p_num_uuid, max_num_uuid);
+    BTM_TRACE_WARNING("%s: number of uuid in EIR = %d, size of uuid list = %d",
+                      __func__, *p_num_uuid, max_num_uuid);
     *p_num_uuid = max_num_uuid;
   }
 
-  BTM_TRACE_DEBUG("BTM_GetEirUuidList type = %02X, number of uuid = %d", type,
+  BTM_TRACE_DEBUG("%s: type = %02X, number of uuid = %d", __func__, type,
                   *p_num_uuid);
 
-  if (uuid_size == LEN_UUID_16) {
+  if (uuid_size == Uuid::kNumBytes16) {
     for (yy = 0; yy < *p_num_uuid; yy++) {
       STREAM_TO_UINT16(*(p_uuid16 + yy), p_uuid_data);
       BTM_TRACE_DEBUG("                     0x%04X", *(p_uuid16 + yy));
     }
-  } else if (uuid_size == LEN_UUID_32) {
+  } else if (uuid_size == Uuid::kNumBytes32) {
     for (yy = 0; yy < *p_num_uuid; yy++) {
       STREAM_TO_UINT32(*(p_uuid32 + yy), p_uuid_data);
       BTM_TRACE_DEBUG("                     0x%08X", *(p_uuid32 + yy));
     }
-  } else if (uuid_size == LEN_UUID_128) {
+  } else if (uuid_size == Uuid::kNumBytes128) {
     for (yy = 0; yy < *p_num_uuid; yy++) {
-      STREAM_TO_ARRAY16(p_uuid_list + yy * LEN_UUID_128, p_uuid_data);
-      for (xx = 0; xx < LEN_UUID_128; xx++)
+      STREAM_TO_ARRAY16(p_uuid_list + yy * Uuid::kNumBytes128, p_uuid_data);
+      for (xx = 0; xx < Uuid::kNumBytes128; xx++)
         snprintf(buff + xx * 2, sizeof(buff) - xx * 2, "%02X",
-                 *(p_uuid_list + yy * LEN_UUID_128 + xx));
+                 *(p_uuid_list + yy * Uuid::kNumBytes128 + xx));
       BTM_TRACE_DEBUG("                     0x%s", buff);
     }
   }
@@ -2569,6 +2502,7 @@ uint8_t BTM_GetEirUuidList(uint8_t* p_eir, uint8_t uuid_size,
  * Description      This function searches UUID list in EIR.
  *
  * Parameters       p_eir - address of EIR
+ *                  eir_len - EIR length
  *                  uuid_size - size of UUID to find
  *                  p_num_uuid - number of UUIDs found
  *                  p_uuid_list_type - EIR data type
@@ -2577,23 +2511,24 @@ uint8_t BTM_GetEirUuidList(uint8_t* p_eir, uint8_t uuid_size,
  *                  beginning of UUID list in EIR - otherwise
  *
  ******************************************************************************/
-static uint8_t* btm_eir_get_uuid_list(uint8_t* p_eir, uint8_t uuid_size,
-                                      uint8_t* p_num_uuid,
-                                      uint8_t* p_uuid_list_type) {
-  uint8_t* p_uuid_data;
+static const uint8_t* btm_eir_get_uuid_list(uint8_t* p_eir, size_t eir_len,
+                                            uint8_t uuid_size,
+                                            uint8_t* p_num_uuid,
+                                            uint8_t* p_uuid_list_type) {
+  const uint8_t* p_uuid_data;
   uint8_t complete_type, more_type;
   uint8_t uuid_len;
 
   switch (uuid_size) {
-    case LEN_UUID_16:
+    case Uuid::kNumBytes16:
       complete_type = BTM_EIR_COMPLETE_16BITS_UUID_TYPE;
       more_type = BTM_EIR_MORE_16BITS_UUID_TYPE;
       break;
-    case LEN_UUID_32:
+    case Uuid::kNumBytes32:
       complete_type = BTM_EIR_COMPLETE_32BITS_UUID_TYPE;
       more_type = BTM_EIR_MORE_32BITS_UUID_TYPE;
       break;
-    case LEN_UUID_128:
+    case Uuid::kNumBytes128:
       complete_type = BTM_EIR_COMPLETE_128BITS_UUID_TYPE;
       more_type = BTM_EIR_MORE_128BITS_UUID_TYPE;
       break;
@@ -2603,9 +2538,11 @@ static uint8_t* btm_eir_get_uuid_list(uint8_t* p_eir, uint8_t uuid_size,
       break;
   }
 
-  p_uuid_data = BTM_CheckEirData(p_eir, complete_type, &uuid_len);
+  p_uuid_data = AdvertiseDataParser::GetFieldByType(p_eir, eir_len,
+                                                    complete_type, &uuid_len);
   if (p_uuid_data == NULL) {
-    p_uuid_data = BTM_CheckEirData(p_eir, more_type, &uuid_len);
+    p_uuid_data = AdvertiseDataParser::GetFieldByType(p_eir, eir_len, more_type,
+                                                      &uuid_len);
     *p_uuid_list_type = more_type;
   } else {
     *p_uuid_list_type = complete_type;
@@ -2628,8 +2565,9 @@ static uint8_t* btm_eir_get_uuid_list(uint8_t* p_eir, uint8_t uuid_size,
  *                  UUID 16-bit - otherwise
  *
  ******************************************************************************/
-static uint16_t btm_convert_uuid_to_uuid16(uint8_t* p_uuid, uint8_t uuid_size) {
-  static const uint8_t base_uuid[LEN_UUID_128] = {
+static uint16_t btm_convert_uuid_to_uuid16(const uint8_t* p_uuid,
+                                           uint8_t uuid_size) {
+  static const uint8_t base_uuid[Uuid::kNumBytes128] = {
       0xFB, 0x34, 0x9B, 0x5F, 0x80, 0x00, 0x00, 0x80,
       0x00, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
   uint16_t uuid16 = 0;
@@ -2638,26 +2576,26 @@ static uint16_t btm_convert_uuid_to_uuid16(uint8_t* p_uuid, uint8_t uuid_size) {
   uint8_t xx;
 
   switch (uuid_size) {
-    case LEN_UUID_16:
+    case Uuid::kNumBytes16:
       STREAM_TO_UINT16(uuid16, p_uuid);
       break;
-    case LEN_UUID_32:
+    case Uuid::kNumBytes32:
       STREAM_TO_UINT32(uuid32, p_uuid);
       if (uuid32 < 0x10000) uuid16 = (uint16_t)uuid32;
       break;
-    case LEN_UUID_128:
+    case Uuid::kNumBytes128:
       /* See if we can compress his UUID down to 16 or 32bit UUIDs */
       is_base_uuid = true;
-      for (xx = 0; xx < LEN_UUID_128 - 4; xx++) {
+      for (xx = 0; xx < Uuid::kNumBytes128 - 4; xx++) {
         if (p_uuid[xx] != base_uuid[xx]) {
           is_base_uuid = false;
           break;
         }
       }
       if (is_base_uuid) {
-        if ((p_uuid[LEN_UUID_128 - 1] == 0) &&
-            (p_uuid[LEN_UUID_128 - 2] == 0)) {
-          p_uuid += (LEN_UUID_128 - 4);
+        if ((p_uuid[Uuid::kNumBytes128 - 1] == 0) &&
+            (p_uuid[Uuid::kNumBytes128 - 2] == 0)) {
+          p_uuid += (Uuid::kNumBytes128 - 4);
           STREAM_TO_UINT16(uuid16, p_uuid);
         }
       }
@@ -2684,13 +2622,14 @@ static uint16_t btm_convert_uuid_to_uuid16(uint8_t* p_uuid, uint8_t uuid_size) {
  *
  ******************************************************************************/
 void btm_set_eir_uuid(uint8_t* p_eir, tBTM_INQ_RESULTS* p_results) {
-  uint8_t* p_uuid_data;
+  const uint8_t* p_uuid_data;
   uint8_t num_uuid;
   uint16_t uuid16;
   uint8_t yy;
   uint8_t type = BTM_EIR_MORE_16BITS_UUID_TYPE;
 
-  p_uuid_data = btm_eir_get_uuid_list(p_eir, LEN_UUID_16, &num_uuid, &type);
+  p_uuid_data = btm_eir_get_uuid_list(p_eir, HCI_EXT_INQ_RESPONSE_LEN,
+                                      Uuid::kNumBytes16, &num_uuid, &type);
 
   if (type == BTM_EIR_COMPLETE_16BITS_UUID_TYPE) {
     p_results->eir_complete_list = true;
@@ -2708,20 +2647,22 @@ void btm_set_eir_uuid(uint8_t* p_eir, tBTM_INQ_RESULTS* p_results) {
     }
   }
 
-  p_uuid_data = btm_eir_get_uuid_list(p_eir, LEN_UUID_32, &num_uuid, &type);
+  p_uuid_data = btm_eir_get_uuid_list(p_eir, HCI_EXT_INQ_RESPONSE_LEN,
+                                      Uuid::kNumBytes32, &num_uuid, &type);
   if (p_uuid_data) {
     for (yy = 0; yy < num_uuid; yy++) {
-      uuid16 = btm_convert_uuid_to_uuid16(p_uuid_data, LEN_UUID_32);
-      p_uuid_data += LEN_UUID_32;
+      uuid16 = btm_convert_uuid_to_uuid16(p_uuid_data, Uuid::kNumBytes32);
+      p_uuid_data += Uuid::kNumBytes32;
       if (uuid16) BTM_AddEirService(p_results->eir_uuid, uuid16);
     }
   }
 
-  p_uuid_data = btm_eir_get_uuid_list(p_eir, LEN_UUID_128, &num_uuid, &type);
+  p_uuid_data = btm_eir_get_uuid_list(p_eir, HCI_EXT_INQ_RESPONSE_LEN,
+                                      Uuid::kNumBytes128, &num_uuid, &type);
   if (p_uuid_data) {
     for (yy = 0; yy < num_uuid; yy++) {
-      uuid16 = btm_convert_uuid_to_uuid16(p_uuid_data, LEN_UUID_128);
-      p_uuid_data += LEN_UUID_128;
+      uuid16 = btm_convert_uuid_to_uuid16(p_uuid_data, Uuid::kNumBytes128);
+      p_uuid_data += Uuid::kNumBytes128;
       if (uuid16) BTM_AddEirService(p_results->eir_uuid, uuid16);
     }
   }

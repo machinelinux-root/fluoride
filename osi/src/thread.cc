@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- *  Copyright (C) 2014 Google, Inc.
+ *  Copyright 2014 Google, Inc.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -20,6 +20,8 @@
 
 #include "osi/include/thread.h"
 
+#include <atomic>
+
 #include <base/logging.h>
 #include <errno.h>
 #include <malloc.h>
@@ -38,7 +40,7 @@
 #include "osi/include/semaphore.h"
 
 struct thread_t {
-  bool is_joined;
+  std::atomic_bool is_joined{false};
   pthread_t pthread;
   pid_t tid;
   char name[THREAD_NAME_MAX + 1];
@@ -117,11 +119,8 @@ void thread_free(thread_t* thread) {
 void thread_join(thread_t* thread) {
   CHECK(thread != NULL);
 
-  // TODO(zachoverflow): use a compare and swap when ready
-  if (!thread->is_joined) {
-    thread->is_joined = true;
+  if (!std::atomic_exchange(&thread->is_joined, true))
     pthread_join(thread->pthread, NULL);
-  }
 }
 
 bool thread_post(thread_t* thread, thread_fn func, void* context) {
@@ -160,6 +159,23 @@ bool thread_set_priority(thread_t* thread, int priority) {
   return true;
 }
 
+bool thread_set_rt_priority(thread_t* thread, int priority) {
+  if (!thread) return false;
+
+  struct sched_param rt_params;
+  rt_params.sched_priority = priority;
+
+  const int rc = sched_setscheduler(thread->tid, SCHED_FIFO, &rt_params);
+  if (rc != 0) {
+    LOG_ERROR(LOG_TAG,
+              "%s unable to set SCHED_FIFO priority %d for tid %d, error %s",
+              __func__, priority, thread->tid, strerror(errno));
+    return false;
+  }
+
+  return true;
+}
+
 bool thread_is_self(const thread_t* thread) {
   CHECK(thread != NULL);
   return !!pthread_equal(pthread_self(), thread->pthread);
@@ -192,7 +208,7 @@ static void* run_thread(void* start_arg) {
   }
   thread->tid = gettid();
 
-  LOG_WARN(LOG_TAG, "%s: thread id %d, thread name %s started", __func__,
+  LOG_INFO(LOG_TAG, "%s: thread id %d, thread name %s started", __func__,
            thread->tid, thread->name);
 
   semaphore_post(start->start_sem);

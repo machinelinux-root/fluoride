@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016 The Android Open Source Project
+ * Copyright 2016 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -45,11 +45,6 @@ void a2dp_vendor_aptx_hd_encoder_init(
 // Cleanup the A2DP aptX-HD encoder.
 void a2dp_vendor_aptx_hd_encoder_cleanup(void);
 
-// Initialize the feeding for the A2DP aptX-HD encoder.
-// The feeding initialization parameters are in |p_feeding_params|.
-void a2dp_vendor_aptx_hd_feeding_init(
-    const tA2DP_FEEDING_PARAMS* p_feeding_params);
-
 // Reset the feeding for the A2DP aptX-HD encoder.
 void a2dp_vendor_aptx_hd_feeding_reset(void);
 
@@ -62,10 +57,5 @@ period_ms_t a2dp_vendor_aptx_hd_get_encoder_interval_ms(void);
 // Prepare and send A2DP aptX-HD encoded frames.
 // |timestamp_us| is the current timestamp (in microseconds).
 void a2dp_vendor_aptx_hd_send_frames(uint64_t timestamp_us);
-
-// Dump aptX-HD codec-related statistics.
-// |fd| is the file descriptor to use to dump the statistics information
-// in user-friendly test format.
-void a2dp_vendor_aptx_hd_debug_codec_dump(int fd);
 
 #endif  // A2DP_VENDOR_APTX_HD_ENCODER_H

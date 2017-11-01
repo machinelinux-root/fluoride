@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- *  Copyright (C) 2006-2013 Broadcom Corporation
+ *  Copyright 2006-2013 Broadcom Corporation
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -163,7 +163,7 @@ static tAVRC_STS avrc_pars_browse_rsp(tAVRC_MSG_BROWSE* p_msg,
 
   /* read the pdu */
   BE_STREAM_TO_UINT8(pdu, p);
-  uint8_t pkt_len;
+  uint16_t pkt_len;
   /* read the entire packet len */
   BE_STREAM_TO_UINT16(pkt_len, p);
 

@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- *  Copyright (C) 2009-2012 Broadcom Corporation
+ *  Copyright 2009-2012 Broadcom Corporation
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -66,6 +66,9 @@
 #include "osi/include/wakelock.h"
 #include "stack_manager.h"
 
+/* Test interface includes */
+#include "mca_api.h"
+
 /*******************************************************************************
  *  Static variables
  ******************************************************************************/
@@ -106,6 +109,9 @@ extern btrc_interface_t* btif_rc_get_interface();
 extern btrc_interface_t* btif_rc_ctrl_get_interface();
 /*SDP search client*/
 extern btsdp_interface_t* btif_sdp_get_interface();
+
+/* List all test interface here */
+extern btmcap_test_interface_t* stack_mcap_get_interface();
 
 /*******************************************************************************
  *  Functions
@@ -164,133 +170,134 @@ bool is_restricted_mode() { return restricted_mode; }
 
 static int get_adapter_properties(void) {
   /* sanity check */
-  if (interface_ready() == false) return BT_STATUS_NOT_READY;
+  if (!interface_ready()) return BT_STATUS_NOT_READY;
 
   return btif_get_adapter_properties();
 }
 
 static int get_adapter_property(bt_property_type_t type) {
   /* sanity check */
-  if (interface_ready() == false) return BT_STATUS_NOT_READY;
+  if (!interface_ready()) return BT_STATUS_NOT_READY;
 
   return btif_get_adapter_property(type);
 }
 
 static int set_adapter_property(const bt_property_t* property) {
   /* sanity check */
-  if (interface_ready() == false) return BT_STATUS_NOT_READY;
+  if (!interface_ready()) return BT_STATUS_NOT_READY;
 
   return btif_set_adapter_property(property);
 }
 
-int get_remote_device_properties(bt_bdaddr_t* remote_addr) {
+int get_remote_device_properties(RawAddress* remote_addr) {
   /* sanity check */
-  if (interface_ready() == false) return BT_STATUS_NOT_READY;
+  if (!interface_ready()) return BT_STATUS_NOT_READY;
 
   return btif_get_remote_device_properties(remote_addr);
 }
 
-int get_remote_device_property(bt_bdaddr_t* remote_addr,
+int get_remote_device_property(RawAddress* remote_addr,
                                bt_property_type_t type) {
   /* sanity check */
-  if (interface_ready() == false) return BT_STATUS_NOT_READY;
+  if (!interface_ready()) return BT_STATUS_NOT_READY;
 
   return btif_get_remote_device_property(remote_addr, type);
 }
 
-int set_remote_device_property(bt_bdaddr_t* remote_addr,
+int set_remote_device_property(RawAddress* remote_addr,
                                const bt_property_t* property) {
   /* sanity check */
-  if (interface_ready() == false) return BT_STATUS_NOT_READY;
+  if (!interface_ready()) return BT_STATUS_NOT_READY;
 
   return btif_set_remote_device_property(remote_addr, property);
 }
 
-int get_remote_service_record(bt_bdaddr_t* remote_addr, bt_uuid_t* uuid) {
+int get_remote_service_record(const RawAddress& remote_addr,
+                              const bluetooth::Uuid& uuid) {
   /* sanity check */
-  if (interface_ready() == false) return BT_STATUS_NOT_READY;
+  if (!interface_ready()) return BT_STATUS_NOT_READY;
 
   return btif_get_remote_service_record(remote_addr, uuid);
 }
 
-int get_remote_services(bt_bdaddr_t* remote_addr) {
+int get_remote_services(RawAddress* remote_addr) {
   /* sanity check */
-  if (interface_ready() == false) return BT_STATUS_NOT_READY;
+  if (!interface_ready()) return BT_STATUS_NOT_READY;
 
-  return btif_dm_get_remote_services(remote_addr);
+  return btif_dm_get_remote_services(*remote_addr);
 }
 
 static int start_discovery(void) {
   /* sanity check */
-  if (interface_ready() == false) return BT_STATUS_NOT_READY;
+  if (!interface_ready()) return BT_STATUS_NOT_READY;
 
   return btif_dm_start_discovery();
 }
 
 static int cancel_discovery(void) {
   /* sanity check */
-  if (interface_ready() == false) return BT_STATUS_NOT_READY;
+  if (!interface_ready()) return BT_STATUS_NOT_READY;
 
   return btif_dm_cancel_discovery();
 }
 
-static int create_bond(const bt_bdaddr_t* bd_addr, int transport) {
+static int create_bond(const RawAddress* bd_addr, int transport) {
   /* sanity check */
-  if (interface_ready() == false) return BT_STATUS_NOT_READY;
+  if (!interface_ready()) return BT_STATUS_NOT_READY;
 
   return btif_dm_create_bond(bd_addr, transport);
 }
 
-static int create_bond_out_of_band(const bt_bdaddr_t* bd_addr, int transport,
+static int create_bond_out_of_band(const RawAddress* bd_addr, int transport,
                                    const bt_out_of_band_data_t* oob_data) {
   /* sanity check */
-  if (interface_ready() == false) return BT_STATUS_NOT_READY;
+  if (!interface_ready()) return BT_STATUS_NOT_READY;
 
   return btif_dm_create_bond_out_of_band(bd_addr, transport, oob_data);
 }
 
-static int cancel_bond(const bt_bdaddr_t* bd_addr) {
+static int cancel_bond(const RawAddress* bd_addr) {
   /* sanity check */
-  if (interface_ready() == false) return BT_STATUS_NOT_READY;
+  if (!interface_ready()) return BT_STATUS_NOT_READY;
 
   return btif_dm_cancel_bond(bd_addr);
 }
 
-static int remove_bond(const bt_bdaddr_t* bd_addr) {
+static int remove_bond(const RawAddress* bd_addr) {
   if (is_restricted_mode() && !btif_storage_is_restricted_device(bd_addr))
     return BT_STATUS_SUCCESS;
 
   /* sanity check */
-  if (interface_ready() == false) return BT_STATUS_NOT_READY;
+  if (!interface_ready()) return BT_STATUS_NOT_READY;
 
   return btif_dm_remove_bond(bd_addr);
 }
 
-static int get_connection_state(const bt_bdaddr_t* bd_addr) {
+static int get_connection_state(const RawAddress* bd_addr) {
   /* sanity check */
-  if (interface_ready() == false) return 0;
+  if (!interface_ready()) return 0;
 
   return btif_dm_get_connection_state(bd_addr);
 }
 
-static int pin_reply(const bt_bdaddr_t* bd_addr, uint8_t accept,
-                     uint8_t pin_len, bt_pin_code_t* pin_code) {
+static int pin_reply(const RawAddress* bd_addr, uint8_t accept, uint8_t pin_len,
+                     bt_pin_code_t* pin_code) {
   /* sanity check */
-  if (interface_ready() == false) return BT_STATUS_NOT_READY;
+  if (!interface_ready()) return BT_STATUS_NOT_READY;
 
   return btif_dm_pin_reply(bd_addr, accept, pin_len, pin_code);
 }
 
-static int ssp_reply(const bt_bdaddr_t* bd_addr, bt_ssp_variant_t variant,
+static int ssp_reply(const RawAddress* bd_addr, bt_ssp_variant_t variant,
                      uint8_t accept, uint32_t passkey) {
   /* sanity check */
-  if (interface_ready() == false) return BT_STATUS_NOT_READY;
+  if (!interface_ready()) return BT_STATUS_NOT_READY;
 
   return btif_dm_ssp_reply(bd_addr, variant, accept, passkey);
 }
 
 static int read_energy_info() {
-  if (interface_ready() == false) return BT_STATUS_NOT_READY;
+  if (!interface_ready()) return BT_STATUS_NOT_READY;
   btif_dm_read_energy_info();
   return BT_STATUS_SUCCESS;
 }
@@ -309,6 +316,7 @@ static void dump(int fd, const char** arguments) {
   btif_debug_config_dump(fd);
   BTA_HfClientDumpStatistics(fd);
   wakelock_debug_dump(fd);
+  osi_allocator_debug_dump(fd);
   alarm_debug_dump(fd);
 #if (BTSNOOP_MEM == TRUE)
   btif_debug_btsnoop_dump(fd);
@@ -321,7 +329,7 @@ static const void* get_profile_interface(const char* profile_id) {
   LOG_INFO(LOG_TAG, "%s: id = %s", __func__, profile_id);
 
   /* sanity check */
-  if (interface_ready() == false) return NULL;
+  if (!interface_ready()) return NULL;
 
   /* check for supported profile interfaces */
   if (is_profile(profile_id, BT_PROFILE_HANDSFREE_ID))
@@ -363,6 +371,9 @@ static const void* get_profile_interface(const char* profile_id) {
   if (is_profile(profile_id, BT_PROFILE_AV_RC_CTRL_ID))
     return btif_rc_ctrl_get_interface();
 
+  if (is_profile(profile_id, BT_TEST_INTERFACE_MCAP_ID))
+    return stack_mcap_get_interface();
+
   return NULL;
 }
 
@@ -370,7 +381,7 @@ int dut_mode_configure(uint8_t enable) {
   LOG_INFO(LOG_TAG, "%s", __func__);
 
   /* sanity check */
-  if (interface_ready() == false) return BT_STATUS_NOT_READY;
+  if (!interface_ready()) return BT_STATUS_NOT_READY;
 
   return btif_dut_mode_configure(enable);
 }
@@ -379,7 +390,7 @@ int dut_mode_send(uint16_t opcode, uint8_t* buf, uint8_t len) {
   LOG_INFO(LOG_TAG, "%s", __func__);
 
   /* sanity check */
-  if (interface_ready() == false) return BT_STATUS_NOT_READY;
+  if (!interface_ready()) return BT_STATUS_NOT_READY;
 
   return btif_dut_mode_send(opcode, buf, len);
 }
@@ -388,18 +399,9 @@ int le_test_mode(uint16_t opcode, uint8_t* buf, uint8_t len) {
   LOG_INFO(LOG_TAG, "%s", __func__);
 
   /* sanity check */
-  if (interface_ready() == false) return BT_STATUS_NOT_READY;
-
-  return btif_le_test_mode(opcode, buf, len);
-}
-
-int config_hci_snoop_log(uint8_t enable) {
-  LOG_INFO(LOG_TAG, "%s", __func__);
-
   if (!interface_ready()) return BT_STATUS_NOT_READY;
 
-  btsnoop_get_interface()->set_api_wants_to_log(enable);
-  return BT_STATUS_SUCCESS;
+  return btif_le_test_mode(opcode, buf, len);
 }
 
 static int set_os_callouts(bt_os_callouts_t* callouts) {
@@ -412,7 +414,7 @@ static int config_clear(void) {
   return btif_config_clear() ? BT_STATUS_SUCCESS : BT_STATUS_FAIL;
 }
 
-static const bt_interface_t bluetoothInterface = {
+EXPORT_SYMBOL bt_interface_t bluetoothInterface = {
     sizeof(bluetoothInterface),
     init,
     enable,
@@ -439,7 +441,6 @@ static const bt_interface_t bluetoothInterface = {
     dut_mode_configure,
     dut_mode_send,
     le_test_mode,
-    config_hci_snoop_log,
     set_os_callouts,
     read_energy_info,
     dump,
@@ -447,40 +448,3 @@ static const bt_interface_t bluetoothInterface = {
     interop_database_clear,
     interop_database_add,
 };
-
-const bt_interface_t* bluetooth__get_bluetooth_interface() {
-  /* fixme -- add property to disable bt interface ? */
-
-  return &bluetoothInterface;
-}
-
-static int close_bluetooth_stack(UNUSED_ATTR struct hw_device_t* device) {
-  cleanup();
-  return 0;
-}
-
-static int open_bluetooth_stack(const struct hw_module_t* module,
-                                UNUSED_ATTR char const* name,
-                                struct hw_device_t** abstraction) {
-  static bluetooth_device_t device;
-  device.common.tag = HARDWARE_DEVICE_TAG;
-  device.common.version = 0;
-  device.common.close = close_bluetooth_stack;
-  device.get_bluetooth_interface = bluetooth__get_bluetooth_interface;
-  device.common.module = (struct hw_module_t*)module;
-  *abstraction = (struct hw_device_t*)&device;
-  return 0;
-}
-
-static struct hw_module_methods_t bt_stack_module_methods = {
-    .open = open_bluetooth_stack,
-};
-
-EXPORT_SYMBOL struct hw_module_t HAL_MODULE_INFO_SYM = {
-    .tag = HARDWARE_MODULE_TAG,
-    .version_major = 1,
-    .version_minor = 0,
-    .id = BT_HARDWARE_MODULE_ID,
-    .name = "Bluetooth Stack",
-    .author = "The Android Open Source Project",
-    .methods = &bt_stack_module_methods};

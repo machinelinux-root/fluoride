@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- *  Copyright (C) 2014  Broadcom Corporation
+ *  Copyright 2014  Broadcom Corporation
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -34,6 +34,8 @@
 #include "hcidefs.h"
 #include "hcimsgs.h"
 
+using bluetooth::Uuid;
+
 #define BTM_BLE_ADV_FILT_META_HDR_LENGTH 3
 #define BTM_BLE_ADV_FILT_FEAT_SELN_LEN 13
 #define BTM_BLE_ADV_FILT_TRACK_NUM 2
@@ -52,7 +54,6 @@
 
 tBTM_BLE_ADV_FILTER_CB btm_ble_adv_filt_cb;
 tBTM_BLE_VSC_CB cmn_ble_vsc_cb;
-static const BD_ADDR na_bda = {0};
 
 static uint8_t btm_ble_cs_update_pf_counter(tBTM_BLE_SCAN_COND_OP action,
                                             uint8_t cond_type,
@@ -213,8 +214,7 @@ void btm_flt_update_cb(uint8_t expected_ocf, tBTM_BLE_PF_CFG_CBACK cb,
   BTM_TRACE_DEBUG("%s: Recd: %d, %d, %d, %d, %d", __func__, op_subcode,
                   expected_ocf, action, status, num_avail);
   if (HCI_SUCCESS == status) {
-    if (memcmp(&btm_ble_adv_filt_cb.cur_filter_target.bda, &na_bda,
-               BD_ADDR_LEN) == 0)
+    if (btm_ble_adv_filt_cb.cur_filter_target.bda.IsEmpty())
       btm_ble_cs_update_pf_counter(action, cond_type, NULL, num_avail);
     else
       btm_ble_cs_update_pf_counter(
@@ -245,8 +245,7 @@ tBTM_BLE_PF_COUNT* btm_ble_find_addr_filter_counter(tBLE_BD_ADDR* p_le_bda) {
   if (p_le_bda == NULL) return &btm_ble_adv_filt_cb.p_addr_filter_count[0];
 
   for (i = 0; i < cmn_ble_vsc_cb.max_filter; i++, p_addr_filter++) {
-    if (p_addr_filter->in_use &&
-        memcmp(p_le_bda->bda, p_addr_filter->bd_addr, BD_ADDR_LEN) == 0) {
+    if (p_addr_filter->in_use && p_le_bda->bda == p_addr_filter->bd_addr) {
       return p_addr_filter;
     }
   }
@@ -263,14 +262,15 @@ tBTM_BLE_PF_COUNT* btm_ble_find_addr_filter_counter(tBLE_BD_ADDR* p_le_bda) {
  *                  otherwise.
  *
  ******************************************************************************/
-tBTM_BLE_PF_COUNT* btm_ble_alloc_addr_filter_counter(BD_ADDR bd_addr) {
+tBTM_BLE_PF_COUNT* btm_ble_alloc_addr_filter_counter(
+    const RawAddress& bd_addr) {
   uint8_t i;
   tBTM_BLE_PF_COUNT* p_addr_filter =
       &btm_ble_adv_filt_cb.p_addr_filter_count[1];
 
   for (i = 0; i < cmn_ble_vsc_cb.max_filter; i++, p_addr_filter++) {
-    if (memcmp(na_bda, p_addr_filter->bd_addr, BD_ADDR_LEN) == 0) {
-      memcpy(p_addr_filter->bd_addr, bd_addr, BD_ADDR_LEN);
+    if (p_addr_filter->bd_addr.IsEmpty()) {
+      p_addr_filter->bd_addr = bd_addr;
       p_addr_filter->in_use = true;
       return p_addr_filter;
     }
@@ -298,14 +298,12 @@ bool btm_ble_dealloc_addr_filter_counter(tBLE_BD_ADDR* p_bd_addr,
            sizeof(tBTM_BLE_PF_COUNT));
 
   for (i = 0; i < cmn_ble_vsc_cb.max_filter; i++, p_addr_filter++) {
-    if ((p_addr_filter->in_use) &&
-        (NULL == p_bd_addr ||
-         (NULL != p_bd_addr &&
-          memcmp(p_bd_addr->bda, p_addr_filter->bd_addr, BD_ADDR_LEN) == 0))) {
+    if (p_addr_filter->in_use &&
+        (!p_bd_addr || p_bd_addr->bda == p_addr_filter->bd_addr)) {
       found = true;
       memset(p_addr_filter, 0, sizeof(tBTM_BLE_PF_COUNT));
 
-      if (NULL != p_bd_addr) break;
+      if (p_bd_addr) break;
     }
   }
   return found;
@@ -541,7 +539,8 @@ void BTM_LE_PF_addr_filter(tBTM_BLE_SCAN_COND_OP action,
  */
 void BTM_LE_PF_uuid_filter(tBTM_BLE_SCAN_COND_OP action,
                            tBTM_BLE_PF_FILT_INDEX filt_index,
-                           tBTM_BLE_PF_COND_TYPE filter_type, tBT_UUID uuid,
+                           tBTM_BLE_PF_COND_TYPE filter_type,
+                           const bluetooth::Uuid& uuid,
                            tBTM_BLE_PF_LOGIC_TYPE cond_logic,
                            tBTM_BLE_PF_COND_MASK* p_uuid_mask,
                            tBTM_BLE_PF_CFG_CBACK cb) {
@@ -563,36 +562,38 @@ void BTM_LE_PF_uuid_filter(tBTM_BLE_SCAN_COND_OP action,
   UINT8_TO_STREAM(p, action);
   UINT8_TO_STREAM(p, filt_index);
 
+  uint8_t uuid_len = uuid.GetShortestRepresentationSize();
   if (action != BTM_BLE_SCAN_COND_CLEAR) {
-    if (uuid.len == LEN_UUID_16) {
-      UINT16_TO_STREAM(p, uuid.uu.uuid16);
-      len += LEN_UUID_16;
-    } else if (uuid.len == LEN_UUID_32) {
-      UINT32_TO_STREAM(p, uuid.uu.uuid32);
-      len += LEN_UUID_32;
-    } else if (uuid.len == LEN_UUID_128) {
-      ARRAY_TO_STREAM(p, uuid.uu.uuid128, LEN_UUID_128);
-      len += LEN_UUID_128;
+    if (uuid_len == Uuid::kNumBytes16) {
+      UINT16_TO_STREAM(p, uuid.As16Bit());
+      len += Uuid::kNumBytes16;
+    } else if (uuid_len == Uuid::kNumBytes32) {
+      UINT32_TO_STREAM(p, uuid.As32Bit());
+      len += Uuid::kNumBytes32;
+    } else if (uuid_len == Uuid::kNumBytes128) {
+      const auto& tmp = uuid.To128BitLE();
+      ARRAY_TO_STREAM(p, tmp.data(), (int)Uuid::kNumBytes128);
+      len += Uuid::kNumBytes128;
     } else {
-      BTM_TRACE_ERROR("illegal UUID length: %d", uuid.len);
+      BTM_TRACE_ERROR("illegal UUID length: %d", uuid_len);
       cb.Run(0, BTM_BLE_PF_CONFIG, 1 /*BTA_FAILURE*/);
       return;
     }
 
     if (p_uuid_mask) {
-      if (uuid.len == LEN_UUID_16) {
+      if (uuid_len == Uuid::kNumBytes16) {
         UINT16_TO_STREAM(p, p_uuid_mask->uuid16_mask);
-        len += LEN_UUID_16;
-      } else if (uuid.len == LEN_UUID_32) {
+        len += Uuid::kNumBytes16;
+      } else if (uuid_len == Uuid::kNumBytes32) {
         UINT32_TO_STREAM(p, p_uuid_mask->uuid32_mask);
-        len += LEN_UUID_32;
-      } else if (uuid.len == LEN_UUID_128) {
-        ARRAY_TO_STREAM(p, p_uuid_mask->uuid128_mask, LEN_UUID_128);
-        len += LEN_UUID_128;
+        len += Uuid::kNumBytes32;
+      } else if (uuid_len == Uuid::kNumBytes128) {
+        ARRAY_TO_STREAM(p, p_uuid_mask->uuid128_mask, (int)Uuid::kNumBytes128);
+        len += Uuid::kNumBytes128;
       }
     } else {
-      memset(p, 0xff, uuid.len);
-      len += uuid.len;
+      memset(p, 0xff, uuid_len);
+      len += uuid_len;
     }
   }
 

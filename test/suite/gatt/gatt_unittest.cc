@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- *  Copyright (C) 2015 Google, Inc.
+ *  Copyright 2015 Google, Inc.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -22,26 +22,12 @@
 
 #include "gatt/gatt_test.h"
 
-#define DEFAULT_RANDOM_SEED 42
-
-namespace {
-
-static void create_random_uuid(bt_uuid_t* uuid, int seed) {
-  srand(seed < 0 ? time(NULL) : seed);
-  for (int i = 0; i < 16; ++i) {
-    uuid->uu[i] = (uint8_t)(rand() % 256);
-  }
-}
-
-}  // namespace
-
 namespace bttest {
 
 TEST_F(GattTest, GattClientRegister) {
   // Registers gatt client.
-  bt_uuid_t gatt_client_uuid;
-  create_random_uuid(&gatt_client_uuid, DEFAULT_RANDOM_SEED);
-  gatt_client_interface()->register_client(&gatt_client_uuid);
+  bluetooth::Uuid gatt_client_uuid = bluetooth::Uuid::GetRandom();
+  gatt_client_interface()->register_client(gatt_client_uuid);
   semaphore_wait(register_client_callback_sem_);
   EXPECT_TRUE(status() == BT_STATUS_SUCCESS)
       << "Error registering GATT client app callback.";
@@ -52,9 +38,8 @@ TEST_F(GattTest, GattClientRegister) {
 
 TEST_F(GattTest, GattServerRegister) {
   // Registers gatt server.
-  bt_uuid_t gatt_server_uuid;
-  create_random_uuid(&gatt_server_uuid, DEFAULT_RANDOM_SEED);
-  gatt_server_interface()->register_server(&gatt_server_uuid);
+  bluetooth::Uuid gatt_server_uuid = bluetooth::Uuid::GetRandom();
+  gatt_server_interface()->register_server(gatt_server_uuid);
   semaphore_wait(register_server_callback_sem_);
   EXPECT_TRUE(status() == BT_STATUS_SUCCESS)
       << "Error registering GATT server app callback.";
@@ -65,24 +50,20 @@ TEST_F(GattTest, GattServerRegister) {
 
 TEST_F(GattTest, GattServerBuild) {
   // Registers gatt server.
-  bt_uuid_t gatt_server_uuid;
-  create_random_uuid(&gatt_server_uuid, DEFAULT_RANDOM_SEED);
-  gatt_server_interface()->register_server(&gatt_server_uuid);
+  bluetooth::Uuid gatt_server_uuid = bluetooth::Uuid::GetRandom();
+  gatt_server_interface()->register_server(gatt_server_uuid);
   semaphore_wait(register_server_callback_sem_);
   EXPECT_TRUE(status() == BT_STATUS_SUCCESS)
       << "Error registering GATT server app callback.";
 
   // Service UUID.
-  bt_uuid_t srvc_uuid;
-  create_random_uuid(&srvc_uuid, -1);
+  bluetooth::Uuid srvc_uuid = bluetooth::Uuid::GetRandom();
 
   // Characteristics UUID.
-  bt_uuid_t char_uuid;
-  create_random_uuid(&char_uuid, -1);
+  bluetooth::Uuid char_uuid = bluetooth::Uuid::GetRandom();
 
   // Descriptor UUID.
-  bt_uuid_t desc_uuid;
-  create_random_uuid(&desc_uuid, -1);
+  bluetooth::Uuid desc_uuid = bluetooth::Uuid::GetRandom();
 
   // Adds service.
   int server_if = server_interface_id();
@@ -98,16 +79,24 @@ TEST_F(GattTest, GattServerBuild) {
   gatt_server_interface()->add_service(server_if, service);
   semaphore_wait(service_added_callback_sem_);
   EXPECT_TRUE(status() == BT_STATUS_SUCCESS) << "Error adding service.";
+  EXPECT_TRUE(server_interface_id() == server_if) << "Wrong server_if added.";
+  int service_handle_added = service_handle();
 
   // Stops server.
   gatt_server_interface()->stop_service(server_if, service_handle());
   semaphore_wait(service_stopped_callback_sem_);
   EXPECT_TRUE(status() == BT_STATUS_SUCCESS) << "Error stopping server.";
+  EXPECT_TRUE(service_handle() == service_handle_added)
+      << "Wrong service handle stopped.";
+  EXPECT_TRUE(server_interface_id() == server_if) << "Wrong server_if stopped.";
 
   // Deletes service.
   gatt_server_interface()->delete_service(server_if, service_handle());
   semaphore_wait(service_deleted_callback_sem_);
   EXPECT_TRUE(status() == BT_STATUS_SUCCESS) << "Error deleting service.";
+  EXPECT_TRUE(service_handle() == service_handle_added)
+      << "Wrong service handle deleted.";
+  EXPECT_TRUE(server_interface_id() == server_if) << "Wrong server_if deleted.";
 
   // Unregisters gatt server. No callback is expected.
   gatt_server_interface()->unregister_server(server_if);

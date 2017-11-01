@@ -1,5 +1,5 @@
 //
-//  Copyright (C) 2015 Google, Inc.
+//  Copyright 2015 Google, Inc.
 //
 //  Licensed under the Apache License, Version 2.0 (the "License");
 //  you may not use this file except in compliance with the License.
@@ -30,7 +30,7 @@ class ScanResult {
   ScanResult(const std::string& device_address,
              const std::vector<uint8_t>& scan_record, int rssi);
   ScanResult() = default;
-  ~ScanResult() = default;
+  virtual ~ScanResult() = default;
 
   // Returns the remote BD_ADDR associated with this scan result.
   const std::string& device_address() const { return device_address_; }

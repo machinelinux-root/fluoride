@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- *  Copyright (C) 1999-2012 Broadcom Corporation
+ *  Copyright 1999-2012 Broadcom Corporation
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@
 #define BTM_API_TYPES_H
 
 #include "bt_target.h"
+#include "device/include/esco_parameters.h"
 #include "hcidefs.h"
 #include "smp_api_types.h"
 
@@ -48,8 +49,9 @@ enum {
   BTM_SUCCESS_NO_SECURITY, /* 17 security passed, no security set  */
   BTM_FAILED_ON_SECURITY,  /* 18 security failed                   */
   BTM_REPEATED_ATTEMPTS,   /* 19 repeated attempts for LE security requests */
-  BTM_MODE4_LEVEL4_NOT_SUPPORTED /* 20 Secure Connections Only Mode can't be
-                                    supported */
+  BTM_MODE4_LEVEL4_NOT_SUPPORTED, /* 20 Secure Connections Only Mode can't be
+                                     supported */
+  BTM_DEV_BLACKLISTED             /* 21 The device is Blacklisted */
 };
 
 typedef uint8_t tBTM_STATUS;
@@ -130,7 +132,7 @@ typedef void(tBTM_VSC_CMPL_CB)(tBTM_VSC_CMPL* p1);
  * Parameters are the BD Address of remote and the Dev Class of remote. If the
  * app returns none zero, the connection or inquiry result will be dropped.
 */
-typedef uint8_t(tBTM_FILTER_CB)(BD_ADDR bd_addr, DEV_CLASS dc);
+typedef uint8_t(tBTM_FILTER_CB)(const RawAddress& bd_addr, DEV_CLASS dc);
 
 /*****************************************************************************
  *  DEVICE DISCOVERY - Inquiry, Remote Name, Discovery, Class of Device
@@ -593,7 +595,7 @@ typedef struct /* contains the two device class condition fields */
 
 typedef union /* contains the inquiry filter condition */
 {
-  BD_ADDR bdaddr_cond;
+  RawAddress bdaddr_cond;
   tBTM_COD_COND cod_cond;
 } tBTM_INQ_FILT_COND;
 
@@ -615,19 +617,26 @@ typedef struct /* contains the parameters passed to the inquiry functions */
 #define BTM_INQ_RESULT_BR 0x01
 #define BTM_INQ_RESULT_BLE 0x02
 
-#define BTM_BLE_EVT_CONN_ADV 0x00
-#define BTM_BLE_EVT_CONN_DIR_ADV 0x01
-#define BTM_BLE_EVT_DISC_ADV 0x02
-#define BTM_BLE_EVT_NON_CONN_ADV 0x03
-#define BTM_BLE_EVT_SCAN_RSP 0x04
-typedef uint8_t tBTM_BLE_EVT_TYPE;
+constexpr uint8_t BLE_EVT_CONNECTABLE_BIT = 0;
+constexpr uint8_t BLE_EVT_SCANNABLE_BIT = 1;
+constexpr uint8_t BLE_EVT_DIRECTED_BIT = 2;
+constexpr uint8_t BLE_EVT_SCAN_RESPONSE_BIT = 3;
+constexpr uint8_t BLE_EVT_LEGACY_BIT = 4;
+
+constexpr uint8_t PHY_LE_NO_PACKET = 0x00;
+constexpr uint8_t PHY_LE_1M = 0x01;
+constexpr uint8_t PHY_LE_2M = 0x02;
+constexpr uint8_t PHY_LE_CODED = 0x03;
+
+constexpr uint8_t NO_ADI_PRESENT = 0xFF;
+constexpr uint8_t TX_POWER_NOT_PRESENT = 0x7F;
 
 /* These are the fields returned in each device's response to the inquiry.  It
  * is returned in the results callback if registered.
 */
 typedef struct {
   uint16_t clock_offset;
-  BD_ADDR remote_bd_addr;
+  RawAddress remote_bd_addr;
   DEV_CLASS dev_class;
   uint8_t page_scan_rep_mode;
   uint8_t page_scan_per_mode;
@@ -638,7 +647,12 @@ typedef struct {
   tBT_DEVICE_TYPE device_type;
   uint8_t inq_result_type;
   uint8_t ble_addr_type;
-  tBTM_BLE_EVT_TYPE ble_evt_type;
+  uint16_t ble_evt_type;
+  uint8_t ble_primary_phy;
+  uint8_t ble_secondary_phy;
+  uint8_t ble_advertising_sid;
+  int8_t ble_tx_power;
+  uint16_t ble_periodic_adv_int;
   uint8_t flag;
 } tBTM_INQ_RESULTS;
 
@@ -671,7 +685,7 @@ typedef struct {
 /* Structure returned with remote name  request */
 typedef struct {
   uint16_t status;
-  BD_ADDR bd_addr;
+  RawAddress bd_addr;
   uint16_t length;
   BD_NAME remote_bd_name;
 } tBTM_REMOTE_DEV_NAME;
@@ -698,7 +712,7 @@ typedef void(tBTM_INQ_DB_CHANGE_CB)(void* p1, bool is_new);
  * First param is inquiry results database, second is pointer of EIR.
 */
 typedef void(tBTM_INQ_RESULTS_CB)(tBTM_INQ_RESULTS* p_inq_results,
-                                  uint8_t* p_eir);
+                                  uint8_t* p_eir, uint16_t eir_len);
 
 /*****************************************************************************
  *  ACL CHANNEL MANAGEMENT
@@ -742,7 +756,7 @@ typedef void(tBTM_INQ_RESULTS_CB)(tBTM_INQ_RESULTS* p_inq_results,
 typedef struct {
   uint8_t hci_status;     /* HCI status returned with the event */
   uint8_t role;           /* BTM_ROLE_MASTER or BTM_ROLE_SLAVE */
-  BD_ADDR remote_bd_addr; /* Remote BD addr involved with the switch */
+  RawAddress remote_bd_addr; /* Remote BD addr involved with the switch */
 } tBTM_ROLE_SWITCH_CMPL;
 
 /* Structure returned with QoS information (in tBTM_CMPL_CB callback function)
@@ -761,8 +775,30 @@ typedef struct {
   tBTM_STATUS status;
   uint8_t hci_status;
   int8_t rssi;
-  BD_ADDR rem_bda;
-} tBTM_RSSI_RESULTS;
+  RawAddress rem_bda;
+} tBTM_RSSI_RESULT;
+
+/* Structure returned with read failed contact counter event
+ * (in tBTM_CMPL_CB callback function) in response to
+ * BTM_ReadFailedContactCounter call.
+ */
+typedef struct {
+  tBTM_STATUS status;
+  uint8_t hci_status;
+  uint16_t failed_contact_counter;
+  RawAddress rem_bda;
+} tBTM_FAILED_CONTACT_COUNTER_RESULT;
+
+/* Structure returned with read automatic flush timeout event
+ * (in tBTM_CMPL_CB callback function) in response to
+ * BTM_ReadAutomaticFlushTimeout call.
+ */
+typedef struct {
+  tBTM_STATUS status;
+  uint8_t hci_status;
+  uint16_t automatic_flush_timeout;
+  RawAddress rem_bda;
+} tBTM_AUTOMATIC_FLUSH_TIMEOUT_RESULT;
 
 /* Structure returned with read current TX power event (in tBTM_CMPL_CB callback
  * function) in response to BTM_ReadTxPower call.
@@ -771,8 +807,8 @@ typedef struct {
   tBTM_STATUS status;
   uint8_t hci_status;
   int8_t tx_power;
-  BD_ADDR rem_bda;
-} tBTM_TX_POWER_RESULTS;
+  RawAddress rem_bda;
+} tBTM_TX_POWER_RESULT;
 
 /* Structure returned with read link quality event (in tBTM_CMPL_CB callback
  * function) in response to BTM_ReadLinkQuality call.
@@ -781,8 +817,8 @@ typedef struct {
   tBTM_STATUS status;
   uint8_t hci_status;
   uint8_t link_quality;
-  BD_ADDR rem_bda;
-} tBTM_LINK_QUALITY_RESULTS;
+  RawAddress rem_bda;
+} tBTM_LINK_QUALITY_RESULT;
 
 /* Structure returned with read inq tx power quality event (in tBTM_CMPL_CB
  * callback function) in response to BTM_ReadInquiryRspTxPower call.
@@ -791,7 +827,7 @@ typedef struct {
   tBTM_STATUS status;
   uint8_t hci_status;
   int8_t tx_power;
-} tBTM_INQ_TXPWR_RESULTS;
+} tBTM_INQ_TXPWR_RESULT;
 
 enum {
   BTM_BL_CONN_EVT,
@@ -815,7 +851,7 @@ typedef uint16_t tBTM_BL_EVENT_MASK;
 /* the data type associated with BTM_BL_CONN_EVT */
 typedef struct {
   tBTM_BL_EVENT event;     /* The event reported. */
-  BD_ADDR_PTR p_bda;       /* The address of the newly connected device */
+  const RawAddress* p_bda; /* The address of the newly connected device */
   DEV_CLASS_PTR p_dc;      /* The device class */
   BD_NAME_PTR p_bdn;       /* The device name */
   uint8_t* p_features;     /* pointer to the remote device's features page[0]
@@ -827,7 +863,7 @@ typedef struct {
 /* the data type associated with BTM_BL_DISCN_EVT */
 typedef struct {
   tBTM_BL_EVENT event;     /* The event reported. */
-  BD_ADDR_PTR p_bda;       /* The address of the disconnected device */
+  const RawAddress* p_bda; /* The address of the disconnected device */
   uint16_t handle;         /* disconnected connection handle */
   tBT_TRANSPORT transport; /* link is LE link or not */
 } tBTM_BL_DISCN_DATA;
@@ -851,7 +887,7 @@ typedef struct {
 /* the data type associated with BTM_BL_ROLE_CHG_EVT */
 typedef struct {
   tBTM_BL_EVENT event; /* The event reported. */
-  BD_ADDR_PTR p_bda;   /* The address of the peer connected device */
+  const RawAddress* p_bda; /* The address of the peer connected device */
   uint8_t new_role;
   uint8_t hci_status; /* HCI status returned with the event */
 } tBTM_BL_ROLE_CHG_DATA;
@@ -877,7 +913,7 @@ typedef void(tBTM_BL_CHANGE_CB)(tBTM_BL_EVENT_DATA* p_data);
  * changes. First param is BD address, second is if added or removed.
  * Registered through BTM_AclRegisterForChanges call.
 */
-typedef void(tBTM_ACL_DB_CHANGE_CB)(BD_ADDR p_bda, DEV_CLASS p_dc,
+typedef void(tBTM_ACL_DB_CHANGE_CB)(const RawAddress& p_bda, DEV_CLASS p_dc,
                                     BD_NAME p_bdn, uint8_t* features,
                                     bool is_new, uint16_t handle,
                                     tBT_TRANSPORT transport);
@@ -898,33 +934,16 @@ typedef void(tBTM_ACL_DB_CHANGE_CB)(BD_ADDR p_bda, DEV_CLASS p_dc,
 /* Define first active SCO index */
 #define BTM_FIRST_ACTIVE_SCO_INDEX BTM_MAX_SCO_LINKS
 
-/* Define SCO packet types used in APIs */
-#define BTM_SCO_PKT_TYPES_MASK_HV1 HCI_ESCO_PKT_TYPES_MASK_HV1
-#define BTM_SCO_PKT_TYPES_MASK_HV2 HCI_ESCO_PKT_TYPES_MASK_HV2
-#define BTM_SCO_PKT_TYPES_MASK_HV3 HCI_ESCO_PKT_TYPES_MASK_HV3
-#define BTM_SCO_PKT_TYPES_MASK_EV3 HCI_ESCO_PKT_TYPES_MASK_EV3
-#define BTM_SCO_PKT_TYPES_MASK_EV4 HCI_ESCO_PKT_TYPES_MASK_EV4
-#define BTM_SCO_PKT_TYPES_MASK_EV5 HCI_ESCO_PKT_TYPES_MASK_EV5
-#define BTM_SCO_PKT_TYPES_MASK_NO_2_EV3 HCI_ESCO_PKT_TYPES_MASK_NO_2_EV3
-#define BTM_SCO_PKT_TYPES_MASK_NO_3_EV3 HCI_ESCO_PKT_TYPES_MASK_NO_3_EV3
-#define BTM_SCO_PKT_TYPES_MASK_NO_2_EV5 HCI_ESCO_PKT_TYPES_MASK_NO_2_EV5
-#define BTM_SCO_PKT_TYPES_MASK_NO_3_EV5 HCI_ESCO_PKT_TYPES_MASK_NO_3_EV5
+#define BTM_SCO_LINK_ONLY_MASK \
+  (ESCO_PKT_TYPES_MASK_HV1 | ESCO_PKT_TYPES_MASK_HV2 | ESCO_PKT_TYPES_MASK_HV3)
 
-#define BTM_SCO_LINK_ONLY_MASK                               \
-  (BTM_SCO_PKT_TYPES_MASK_HV1 | BTM_SCO_PKT_TYPES_MASK_HV2 | \
-   BTM_SCO_PKT_TYPES_MASK_HV3)
-
-#define BTM_ESCO_LINK_ONLY_MASK                              \
-  (BTM_SCO_PKT_TYPES_MASK_EV3 | BTM_SCO_PKT_TYPES_MASK_EV4 | \
-   BTM_SCO_PKT_TYPES_MASK_EV5)
+#define BTM_ESCO_LINK_ONLY_MASK \
+  (ESCO_PKT_TYPES_MASK_EV3 | ESCO_PKT_TYPES_MASK_EV4 | ESCO_PKT_TYPES_MASK_EV5)
 
 #define BTM_SCO_LINK_ALL_PKT_MASK \
   (BTM_SCO_LINK_ONLY_MASK | BTM_ESCO_LINK_ONLY_MASK)
 
 #define BTM_VALID_SCO_ALL_PKT_TYPE HCI_VALID_SCO_ALL_PKT_TYPE
-
-/* Passed in BTM_CreateSco if the packet type parameter should be ignored */
-#define BTM_IGNORE_SCO_PKT_TYPE 0
 
 /***************
  *  SCO Types
@@ -934,30 +953,13 @@ typedef void(tBTM_ACL_DB_CHANGE_CB)(BD_ADDR p_bda, DEV_CLASS p_dc,
 typedef uint8_t tBTM_SCO_TYPE;
 
 /*******************
- * SCO Routing Path
- *******************/
-#define BTM_SCO_ROUTE_PCM HCI_BRCM_SCO_ROUTE_PCM
-#define BTM_SCO_ROUTE_HCI HCI_BRCM_SCO_ROUTE_HCI
-typedef uint8_t tBTM_SCO_ROUTE_TYPE;
-
-/*******************
  * SCO Codec Types
  *******************/
 // TODO(google) This should use common definitions
-// in hci/include/hci_audio.h
 #define BTM_SCO_CODEC_NONE 0x0000
 #define BTM_SCO_CODEC_CVSD 0x0001
 #define BTM_SCO_CODEC_MSBC 0x0002
 typedef uint16_t tBTM_SCO_CODEC_TYPE;
-
-/*******************
- * SCO Air Mode Types
- *******************/
-#define BTM_SCO_AIR_MODE_U_LAW 0
-#define BTM_SCO_AIR_MODE_A_LAW 1
-#define BTM_SCO_AIR_MODE_CVSD 2
-#define BTM_SCO_AIR_MODE_TRANSPNT 3
-typedef uint8_t tBTM_SCO_AIR_MODE_TYPE;
 
 /*******************
  * SCO Voice Settings
@@ -988,20 +990,6 @@ typedef void(tBTM_SCO_CB)(uint16_t sco_inx);
 typedef void(tBTM_SCO_DATA_CB)(uint16_t sco_inx, BT_HDR* p_data,
                                tBTM_SCO_DATA_FLAG status);
 
-/******************
- *  eSCO Constants
- ******************/
-#define BTM_64KBITS_RATE 0x00001f40 /* 64 kbits/sec data rate */
-
-/* Retransmission effort */
-#define BTM_ESCO_RETRANS_OFF 0
-#define BTM_ESCO_RETRANS_POWER 1
-#define BTM_ESCO_RETRANS_QUALITY 2
-#define BTM_ESCO_RETRANS_DONTCARE 0xff
-
-/* Max Latency Don't Care */
-#define BTM_ESCO_MAX_LAT_DONTCARE 0xffff
-
 /***************
  *  eSCO Types
  ***************/
@@ -1010,27 +998,20 @@ typedef void(tBTM_SCO_DATA_CB)(uint16_t sco_inx, BT_HDR* p_data,
 #define BTM_ESCO_CONN_REQ_EVT 2
 typedef uint8_t tBTM_ESCO_EVT;
 
-/* Passed into BTM_SetEScoMode() */
+/* Structure passed with SCO change command and events.
+ * Used by both Sync and Enhanced sync messaging
+ */
 typedef struct {
-  uint32_t tx_bw;
-  uint32_t rx_bw;
-  uint16_t max_latency;
-  uint16_t voice_contfmt; /* Voice Settings or Content Format */
+  uint16_t max_latency_ms;
   uint16_t packet_types;
-  uint8_t retrans_effort;
-} tBTM_ESCO_PARAMS;
-
-typedef struct {
-  uint16_t max_latency;
-  uint16_t packet_types;
-  uint8_t retrans_effort;
+  uint8_t retransmission_effort;
 } tBTM_CHG_ESCO_PARAMS;
 
 /* Returned by BTM_ReadEScoLinkParms() */
 typedef struct {
   uint16_t rx_pkt_len;
   uint16_t tx_pkt_len;
-  BD_ADDR bd_addr;
+  RawAddress bd_addr;
   uint8_t link_type; /* BTM_LINK_TYPE_SCO or BTM_LINK_TYPE_ESCO */
   uint8_t tx_interval;
   uint8_t retrans_window;
@@ -1041,7 +1022,7 @@ typedef struct {
   uint16_t sco_inx;
   uint16_t rx_pkt_len;
   uint16_t tx_pkt_len;
-  BD_ADDR bd_addr;
+  RawAddress bd_addr;
   uint8_t hci_status;
   uint8_t tx_interval;
   uint8_t retrans_window;
@@ -1049,7 +1030,7 @@ typedef struct {
 
 typedef struct {
   uint16_t sco_inx;
-  BD_ADDR bd_addr;
+  RawAddress bd_addr;
   DEV_CLASS dev_class;
   tBTM_SCO_TYPE link_type;
 } tBTM_ESCO_CONN_REQ_EVT_DATA;
@@ -1343,11 +1324,9 @@ typedef uint8_t tBTM_LINK_KEY_TYPE;
  *              Is originator of the connection
  *              Result of the operation
 */
-typedef uint8_t(tBTM_AUTHORIZE_CALLBACK)(BD_ADDR bd_addr, DEV_CLASS dev_class,
-                                         tBTM_BD_NAME bd_name,
-                                         uint8_t* service_name,
-                                         uint8_t service_id,
-                                         bool is_originator);
+typedef uint8_t(tBTM_AUTHORIZE_CALLBACK)(
+    const RawAddress& bd_addr, DEV_CLASS dev_class, tBTM_BD_NAME bd_name,
+    uint8_t* service_name, uint8_t service_id, bool is_originator);
 
 /* Get PIN for the connection.  Parameters are
  *              BD Address of remote
@@ -1355,15 +1334,17 @@ typedef uint8_t(tBTM_AUTHORIZE_CALLBACK)(BD_ADDR bd_addr, DEV_CLASS dev_class,
  *              BD Name of remote
  *              Flag indicating the minimum pin code length to be 16 digits
 */
-typedef uint8_t(tBTM_PIN_CALLBACK)(BD_ADDR bd_addr, DEV_CLASS dev_class,
-                                   tBTM_BD_NAME bd_name, bool min_16_digit);
+typedef uint8_t(tBTM_PIN_CALLBACK)(const RawAddress& bd_addr,
+                                   DEV_CLASS dev_class, tBTM_BD_NAME bd_name,
+                                   bool min_16_digit);
 
 /* New Link Key for the connection.  Parameters are
  *              BD Address of remote
  *              Link Key
  *              Key Type: Combination, Local Unit, or Remote Unit
 */
-typedef uint8_t(tBTM_LINK_KEY_CALLBACK)(BD_ADDR bd_addr, DEV_CLASS dev_class,
+typedef uint8_t(tBTM_LINK_KEY_CALLBACK)(const RawAddress& bd_addr,
+                                        DEV_CLASS dev_class,
                                         tBTM_BD_NAME bd_name, uint8_t* key,
                                         uint8_t key_type);
 
@@ -1371,7 +1352,7 @@ typedef uint8_t(tBTM_LINK_KEY_CALLBACK)(BD_ADDR bd_addr, DEV_CLASS dev_class,
  *              BD Address of remote
  *              BD Name of remote
 */
-typedef void(tBTM_RMT_NAME_CALLBACK)(BD_ADDR bd_addr, DEV_CLASS dc,
+typedef void(tBTM_RMT_NAME_CALLBACK)(const RawAddress& bd_addr, DEV_CLASS dc,
                                      tBTM_BD_NAME bd_name);
 
 /* Authentication complete for the connection.  Parameters are
@@ -1380,7 +1361,7 @@ typedef void(tBTM_RMT_NAME_CALLBACK)(BD_ADDR bd_addr, DEV_CLASS dc,
  *              BD Name of remote
  *
 */
-typedef uint8_t(tBTM_AUTH_COMPLETE_CALLBACK)(BD_ADDR bd_addr,
+typedef uint8_t(tBTM_AUTH_COMPLETE_CALLBACK)(const RawAddress& bd_addr,
                                              DEV_CLASS dev_class,
                                              tBTM_BD_NAME bd_name, int result);
 
@@ -1448,7 +1429,7 @@ typedef uint8_t tBTM_OOB_DATA;
 
 /* data type for BTM_SP_IO_REQ_EVT */
 typedef struct {
-  BD_ADDR bd_addr;        /* peer address */
+  RawAddress bd_addr;     /* peer address */
   tBTM_IO_CAP io_cap;     /* local IO capabilities */
   tBTM_OOB_DATA oob_data; /* OOB data present (locally) for the peer device */
   tBTM_AUTH_REQ auth_req; /* Authentication required (for local device) */
@@ -1457,7 +1438,7 @@ typedef struct {
 
 /* data type for BTM_SP_IO_RSP_EVT */
 typedef struct {
-  BD_ADDR bd_addr;    /* peer address */
+  RawAddress bd_addr; /* peer address */
   tBTM_IO_CAP io_cap; /* peer IO capabilities */
   tBTM_OOB_DATA
       oob_data; /* OOB data present at peer device for the local device */
@@ -1466,7 +1447,7 @@ typedef struct {
 
 /* data type for BTM_SP_CFM_REQ_EVT */
 typedef struct {
-  BD_ADDR bd_addr;      /* peer address */
+  RawAddress bd_addr;   /* peer address */
   DEV_CLASS dev_class;  /* peer CoD */
   tBTM_BD_NAME bd_name; /* peer device name */
   uint32_t num_val; /* the numeric value for comparison. If just_works, do not
@@ -1480,14 +1461,14 @@ typedef struct {
 
 /* data type for BTM_SP_KEY_REQ_EVT */
 typedef struct {
-  BD_ADDR bd_addr;      /* peer address */
+  RawAddress bd_addr;   /* peer address */
   DEV_CLASS dev_class;  /* peer CoD */
   tBTM_BD_NAME bd_name; /* peer device name */
 } tBTM_SP_KEY_REQ;
 
 /* data type for BTM_SP_KEY_NOTIF_EVT */
 typedef struct {
-  BD_ADDR bd_addr;      /* peer address */
+  RawAddress bd_addr;   /* peer address */
   DEV_CLASS dev_class;  /* peer CoD */
   tBTM_BD_NAME bd_name; /* peer device name */
   uint32_t passkey;     /* passkey */
@@ -1505,7 +1486,7 @@ typedef uint8_t tBTM_SP_KEY_TYPE;
 
 /* data type for BTM_SP_KEYPRESS_EVT */
 typedef struct {
-  BD_ADDR bd_addr; /* peer address */
+  RawAddress bd_addr; /* peer address */
   tBTM_SP_KEY_TYPE notif_type;
 } tBTM_SP_KEYPRESS;
 
@@ -1518,14 +1499,14 @@ typedef struct {
 
 /* data type for BTM_SP_RMT_OOB_EVT */
 typedef struct {
-  BD_ADDR bd_addr;      /* peer address */
+  RawAddress bd_addr;   /* peer address */
   DEV_CLASS dev_class;  /* peer CoD */
   tBTM_BD_NAME bd_name; /* peer device name */
 } tBTM_SP_RMT_OOB;
 
 /* data type for BTM_SP_COMPLT_EVT */
 typedef struct {
-  BD_ADDR bd_addr;      /* peer address */
+  RawAddress bd_addr;   /* peer address */
   DEV_CLASS dev_class;  /* peer CoD */
   tBTM_BD_NAME bd_name; /* peer device name */
   tBTM_STATUS status;   /* status of the simple pairing process */
@@ -1533,7 +1514,7 @@ typedef struct {
 
 /* data type for BTM_SP_UPGRADE_EVT */
 typedef struct {
-  BD_ADDR bd_addr; /* peer address */
+  RawAddress bd_addr; /* peer address */
   bool upgrade;    /* true, to upgrade the link key */
 } tBTM_SP_UPGRADE;
 
@@ -1555,7 +1536,7 @@ typedef union {
 */
 typedef uint8_t(tBTM_SP_CALLBACK)(tBTM_SP_EVT event, tBTM_SP_EVT_DATA* p_data);
 
-typedef void(tBTM_MKEY_CALLBACK)(BD_ADDR bd_addr, uint8_t status,
+typedef void(tBTM_MKEY_CALLBACK)(const RawAddress& bd_addr, uint8_t status,
                                  uint8_t key_flag);
 
 /* Encryption enabled/disabled complete: Optionally passed with
@@ -1565,7 +1546,7 @@ typedef void(tBTM_MKEY_CALLBACK)(BD_ADDR bd_addr, uint8_t status,
  *              optional data passed in by BTM_SetEncryption
  *              tBTM_STATUS - result of the operation
 */
-typedef void(tBTM_SEC_CBACK)(BD_ADDR bd_addr, tBT_TRANSPORT trasnport,
+typedef void(tBTM_SEC_CBACK)(const RawAddress* bd_addr, tBT_TRANSPORT trasnport,
                              void* p_ref_data, tBTM_STATUS result);
 
 /* Bond Cancel complete. Parameters are
@@ -1621,17 +1602,18 @@ typedef uint8_t tBTM_LE_EVT;
 typedef uint8_t tBTM_LE_KEY_TYPE;
 
 #define BTM_LE_AUTH_REQ_NO_BOND SMP_AUTH_NO_BOND /* 0 */
-#define BTM_LE_AUTH_REQ_BOND SMP_AUTH_GEN_BOND   /* 1 << 0 */
+#define BTM_LE_AUTH_REQ_BOND SMP_AUTH_BOND       /* 1 << 0 */
 #define BTM_LE_AUTH_REQ_MITM SMP_AUTH_YN_BIT     /* 1 << 2 */
 typedef uint8_t tBTM_LE_AUTH_REQ;
 #define BTM_LE_SC_SUPPORT_BIT SMP_SC_SUPPORT_BIT /* (1 << 3) */
 #define BTM_LE_KP_SUPPORT_BIT SMP_KP_SUPPORT_BIT /* (1 << 4) */
+#define BTM_LE_H7_SUPPORT_BIT SMP_H7_SUPPORT_BIT /* (1 << 5) */
 
-#define BTM_LE_AUTH_REQ_SC_ONLY SMP_AUTH_SC_ENC_ONLY     /* 1 << 3 */
-#define BTM_LE_AUTH_REQ_SC_BOND SMP_AUTH_SC_GB           /* 1001 */
-#define BTM_LE_AUTH_REQ_SC_MITM SMP_AUTH_SC_MITM_NB      /* 1100 */
-#define BTM_LE_AUTH_REQ_SC_MITM_BOND SMP_AUTH_SC_MITM_GB /* 1101 */
-#define BTM_LE_AUTH_REQ_MASK SMP_AUTH_MASK               /* 0x1D */
+#define BTM_LE_AUTH_REQ_SC_ONLY SMP_AUTH_SC_ENC_ONLY     /* 00101000 */
+#define BTM_LE_AUTH_REQ_SC_BOND SMP_AUTH_SC_GB           /* 00101001 */
+#define BTM_LE_AUTH_REQ_SC_MITM SMP_AUTH_SC_MITM_NB      /* 00101100 */
+#define BTM_LE_AUTH_REQ_SC_MITM_BOND SMP_AUTH_SC_MITM_GB /* 00101101 */
+#define BTM_LE_AUTH_REQ_MASK SMP_AUTH_MASK               /* 0x3D */
 
 /* LE security level */
 #define BTM_LE_SEC_NONE SMP_SEC_NONE
@@ -1695,7 +1677,7 @@ typedef struct {
 typedef struct {
   BT_OCTET16 irk;
   tBLE_ADDR_TYPE addr_type;
-  BD_ADDR static_addr;
+  RawAddress static_addr;
 } tBTM_LE_PID_KEYS;
 
 typedef union {
@@ -1727,7 +1709,7 @@ typedef union {
 /* Simple Pairing Events.  Called by the stack when Simple Pairing related
  * events occur.
 */
-typedef uint8_t(tBTM_LE_CALLBACK)(tBTM_LE_EVT event, BD_ADDR bda,
+typedef uint8_t(tBTM_LE_CALLBACK)(tBTM_LE_EVT event, const RawAddress& bda,
                                   tBTM_LE_EVT_DATA* p_data);
 
 #define BTM_BLE_KEY_TYPE_ID 1
@@ -1769,7 +1751,7 @@ typedef struct {
 /* Callback function for when a link supervision timeout event occurs.
  * This asynchronous event is enabled/disabled by calling BTM_RegForLstoEvt().
 */
-typedef void(tBTM_LSTO_CBACK)(BD_ADDR remote_bda, uint16_t timeout);
+typedef void(tBTM_LSTO_CBACK)(const RawAddress& remote_bda, uint16_t timeout);
 
 /*****************************************************************************
  *  POWER MANAGEMENT
@@ -1823,8 +1805,9 @@ typedef struct {
 /*************************************
  *  Power Manager Callback Functions
  *************************************/
-typedef void(tBTM_PM_STATUS_CBACK)(BD_ADDR p_bda, tBTM_PM_STATUS status,
-                                   uint16_t value, uint8_t hci_status);
+typedef void(tBTM_PM_STATUS_CBACK)(const RawAddress& p_bda,
+                                   tBTM_PM_STATUS status, uint16_t value,
+                                   uint8_t hci_status);
 
 /************************
  *  Stored Linkkey Types
@@ -1849,7 +1832,7 @@ typedef uint8_t tBTM_MIP_EVT;
 
 typedef struct {
   tBTM_MIP_EVT event;
-  BD_ADDR bd_addr;
+  RawAddress bd_addr;
   uint16_t mip_id;
 } tBTM_MIP_MODE_CHANGE;
 
@@ -1870,7 +1853,7 @@ typedef struct {
 
 typedef struct {
   tBTM_MIP_EVT event;
-  BD_ADDR bd_addr;
+  RawAddress bd_addr;
   uint8_t data[11]; /* data[0] shows Vender-specific device type */
 } tBTM_MIP_EIR_HANDSHAKE;
 
@@ -1892,7 +1875,7 @@ typedef union {
 typedef void(tBTM_MIP_EVENTS_CB)(tBTM_MIP_EVT event, tBTM_MIP_EVENT_DATA data);
 
 /* MIP Device query callback function  */
-typedef bool(tBTM_MIP_QUERY_CB)(BD_ADDR dev_addr, uint8_t* p_mode,
+typedef bool(tBTM_MIP_QUERY_CB)(const RawAddress& dev_addr, uint8_t* p_mode,
                                 LINK_KEY link_key);
 
 /* ACL link on, SCO link ongoing, sniff mode */

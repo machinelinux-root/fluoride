@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- *  Copyright (C) 1999-2012 Broadcom Corporation
+ *  Copyright 1999-2012 Broadcom Corporation
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -312,7 +312,7 @@ bool SDP_DeleteRecord(uint32_t handle) {
     for (xx = 0; xx < sdp_cb.server_db.num_records; xx++, p_rec++) {
       if (p_rec->record_handle == handle) {
         /* Found it. Shift everything up one */
-        for (yy = xx; yy < sdp_cb.server_db.num_records; yy++, p_rec++) {
+        for (yy = xx; yy < sdp_cb.server_db.num_records - 1; yy++, p_rec++) {
           *p_rec = *(p_rec + 1);
 
           /* Adjust the attribute value pointer for each attribute */

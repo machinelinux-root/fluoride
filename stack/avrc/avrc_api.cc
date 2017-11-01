@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- *  Copyright (C) 2003-2016 Broadcom Corporation
+ *  Copyright 2003-2016 Broadcom Corporation
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -34,7 +34,6 @@
 /*****************************************************************************
  *  Global data
  ****************************************************************************/
-extern fixed_queue_t* btu_general_alarm_queue;
 
 #define AVRC_MAX_RCV_CTRL_EVT AVCT_BROWSE_UNCONG_IND_EVT
 
@@ -82,7 +81,7 @@ static const uint8_t avrc_ctrl_event_map[] = {
  *
  *****************************************************************************/
 static void avrc_ctrl_cback(uint8_t handle, uint8_t event, uint16_t result,
-                            BD_ADDR peer_addr) {
+                            const RawAddress* peer_addr) {
   uint8_t avrc_event;
 
   if (event <= AVRC_MAX_RCV_CTRL_EVT && avrc_cb.ccb[handle].p_ctrl_cback) {
@@ -98,6 +97,7 @@ static void avrc_ctrl_cback(uint8_t handle, uint8_t event, uint16_t result,
       (event == AVCT_DISCONNECT_IND_EVT)) {
     avrc_flush_cmd_q(handle);
     alarm_free(avrc_cb.ccb_int[handle].tle);
+    avrc_cb.ccb_int[handle].tle = NULL;
   }
 }
 
@@ -116,6 +116,7 @@ void avrc_flush_cmd_q(uint8_t handle) {
 
   alarm_cancel(avrc_cb.ccb_int[handle].tle);
   fixed_queue_free(avrc_cb.ccb_int[handle].cmd_q, osi_free);
+  avrc_cb.ccb_int[handle].cmd_q = NULL;
 }
 
 /******************************************************************************
@@ -203,8 +204,8 @@ void avrc_start_cmd_timer(uint8_t handle, uint8_t label, uint8_t msg_mask) {
   AVRC_TRACE_DEBUG("AVRC: starting timer (handle=0x%02x, label=0x%02x)", handle,
                    label);
 
-  alarm_set_on_queue(avrc_cb.ccb_int[handle].tle, AVRC_CMD_TOUT_MS,
-                     avrc_process_timeout, param, btu_general_alarm_queue);
+  alarm_set_on_mloop(avrc_cb.ccb_int[handle].tle, AVRC_CMD_TOUT_MS,
+                     avrc_process_timeout, param);
 }
 
 /******************************************************************************
@@ -265,10 +266,9 @@ static void avrc_prep_end_frag(uint8_t handle) {
   p_fcb = &avrc_cb.fcb[handle];
 
   /* The response type of the end fragment should be the same as the the PDU of
-  *"End Fragment
-  ** Response" Errata:
-  *https://www.bluetooth.org/errata/errata_view.cfm?errata_id=4383
-  */
+   * "End Fragment Response" Errata:
+   * https://www.bluetooth.org/errata/errata_view.cfm?errata_id=4383
+   */
   p_orig_data = ((uint8_t*)(p_fcb->p_fmsg + 1) + p_fcb->p_fmsg->offset);
   rsp_type = ((*p_orig_data) & AVRC_CTYPE_MASK);
 
@@ -497,16 +497,16 @@ static uint8_t avrc_proc_far_msg(uint8_t handle, uint8_t label, uint8_t cr,
       p_rcb->p_rmsg->offset = p_rcb->rasm_offset = 0;
 
       /*
-          * Free original START packet, replace with pointer to
-          * reassembly buffer.
-          */
+       * Free original START packet, replace with pointer to
+       * reassembly buffer.
+       */
       osi_free(p_pkt);
       *pp_pkt = p_rcb->p_rmsg;
 
       /*
-          * Set offset to point to where to copy next - use the same
-          * reassembly logic as AVCT.
-          */
+       * Set offset to point to where to copy next - use the same
+       * reassembly logic as AVCT.
+       */
       p_rcb->p_rmsg->offset += p_rcb->p_rmsg->len;
       req_continue = true;
     } else if (p_rcb->p_rmsg == NULL) {
@@ -521,9 +521,9 @@ static uint8_t avrc_proc_far_msg(uint8_t handle, uint8_t label, uint8_t cr,
     } else {
       /* get size of buffer holding assembled message */
       /*
-          * NOTE: The buffer is allocated above at the beginning of the
-          * reassembly, and is always of size BT_DEFAULT_BUFFER_SIZE.
-          */
+       * NOTE: The buffer is allocated above at the beginning of the
+       * reassembly, and is always of size BT_DEFAULT_BUFFER_SIZE.
+       */
       uint16_t buf_len = BT_DEFAULT_BUFFER_SIZE - sizeof(BT_HDR);
       /* adjust offset and len of fragment for header byte */
       p_pkt->offset += (AVRC_VENDOR_HDR_SIZE + AVRC_MIN_META_HDR_SIZE);
@@ -580,10 +580,10 @@ static uint8_t avrc_proc_far_msg(uint8_t handle, uint8_t label, uint8_t cr,
       drop_code = 4;
 
   } else if (cr == AVCT_RSP) {
-    if (req_continue == true) {
+    if (req_continue) {
       avrc_cmd.pdu = AVRC_PDU_REQUEST_CONTINUATION_RSP;
       drop_code = 2;
-    } else if (buf_overflow == true) {
+    } else if (buf_overflow) {
       /* Incoming message too big to fit in BT_DEFAULT_BUFFER_SIZE. Send abort
        * to peer  */
       avrc_cmd.pdu = AVRC_PDU_ABORT_CONTINUATION_RSP;
@@ -593,7 +593,10 @@ static uint8_t avrc_proc_far_msg(uint8_t handle, uint8_t label, uint8_t cr,
     }
     avrc_cmd.status = AVRC_STS_NO_ERROR;
     avrc_cmd.target_pdu = p_rcb->rasm_pdu;
-    status = AVRC_BldCommand((tAVRC_COMMAND*)&avrc_cmd, &p_cmd);
+
+    tAVRC_COMMAND avrc_command;
+    avrc_command.continu = avrc_cmd;
+    status = AVRC_BldCommand(&avrc_command, &p_cmd);
     if (status == AVRC_STS_NO_ERROR) {
       AVRC_MsgReq(handle, (uint8_t)(label), AVRC_CMD_CTRL, p_cmd);
     }
@@ -858,7 +861,7 @@ static void avrc_msg_cback(uint8_t handle, uint8_t label, uint8_t cr,
     drop = true;
   }
 
-  if (drop == false) {
+  if (!drop) {
     msg.hdr.opcode = opcode;
     (*avrc_cb.ccb[handle].p_msg_cback)(handle, label, opcode, &msg);
   } else {
@@ -1026,7 +1029,7 @@ static BT_HDR* avrc_pass_msg(tAVRC_MSG_PASS* p_msg) {
  *
  *****************************************************************************/
 uint16_t AVRC_Open(uint8_t* p_handle, tAVRC_CONN_CB* p_ccb,
-                   BD_ADDR_PTR peer_addr) {
+                   const RawAddress& peer_addr) {
   uint16_t status;
   tAVCT_CC cc;
 
@@ -1213,7 +1216,7 @@ uint16_t AVRC_MsgReq(uint8_t handle, uint8_t label, uint8_t ctype,
   /* AVRCP spec has not defined any control channel commands that needs
    * fragmentation at this level
    * check for fragmentation only on the response */
-  if ((cr == AVCT_RSP) && (chk_frag == true)) {
+  if ((cr == AVCT_RSP) && (chk_frag)) {
     if (p_pkt->len > AVRC_MAX_CTRL_DATA_LEN) {
       int offset_len = MAX(AVCT_MSG_OFFSET, p_pkt->offset);
       BT_HDR* p_pkt_new =

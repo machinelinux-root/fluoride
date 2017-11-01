@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- *  Copyright (C) 2003-2012 Broadcom Corporation
+ *  Copyright 2003-2012 Broadcom Corporation
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -165,7 +165,6 @@ typedef uint16_t tBTA_AG_PEER_FEAT;
 
 /* HFP peer supported codec masks */
 // TODO(google) This should use common definitions
-// in hci/include/hci_audio.h
 #define BTA_AG_CODEC_NONE BTM_SCO_CODEC_NONE
 #define BTA_AG_CODEC_CVSD BTM_SCO_CODEC_CVSD /* CVSD */
 #define BTA_AG_CODEC_MSBC BTM_SCO_CODEC_MSBC /* mSBC */
@@ -292,9 +291,7 @@ typedef struct {
 #define BTA_AG_MIC_EVT 8         /* Microphone volume changed */
 #define BTA_AG_AT_CKPD_EVT 9     /* CKPD from the HS */
 #define BTA_AG_DISABLE_EVT 30    /* AG disabled */
-#if (BTM_WBS_INCLUDED == TRUE)
 #define BTA_AG_WBS_EVT 31 /* SCO codec info */
-#endif
 /* Values below are for HFP only */
 #define BTA_AG_AT_A_EVT 10    /* Answer a call */
 #define BTA_AG_AT_D_EVT 11    /* Place a call using number or memory dial */
@@ -335,7 +332,7 @@ typedef struct {
 /* data associated with BTA_AG_OPEN_EVT */
 typedef struct {
   tBTA_AG_HDR hdr;
-  BD_ADDR bd_addr;
+  RawAddress bd_addr;
   tBTA_SERVICE_ID service_id;
   tBTA_AG_STATUS status;
 } tBTA_AG_OPEN;
@@ -343,21 +340,21 @@ typedef struct {
 /* data associated with BTA_AG_CLOSE_EVT */
 typedef struct {
   tBTA_AG_HDR hdr;
-  BD_ADDR bd_addr;
+  RawAddress bd_addr;
 } tBTA_AG_CLOSE;
 
 /* data associated with BTA_AG_CONN_EVT */
 typedef struct {
   tBTA_AG_HDR hdr;
   tBTA_AG_PEER_FEAT peer_feat;
-  BD_ADDR bd_addr;
+  RawAddress bd_addr;
   tBTA_AG_PEER_CODEC peer_codec;
 } tBTA_AG_CONN;
 
 /* data associated with AT command event */
 typedef struct {
   tBTA_AG_HDR hdr;
-  BD_ADDR bd_addr;
+  RawAddress bd_addr;
   char str[BTA_AG_AT_MAX_LEN + 1];
   uint16_t num;
   uint8_t idx;   /* call number used by CLCC and CHLD */
@@ -515,7 +512,7 @@ void BTA_AgDeregister(uint16_t handle);
  * Returns          void
  *
  ******************************************************************************/
-void BTA_AgOpen(uint16_t handle, BD_ADDR bd_addr, tBTA_SEC sec_mask,
+void BTA_AgOpen(uint16_t handle, const RawAddress& bd_addr, tBTA_SEC sec_mask,
                 tBTA_SERVICE_MASK services);
 
 /*******************************************************************************
@@ -585,5 +582,7 @@ void BTA_AgResult(uint16_t handle, tBTA_AG_RES result,
  *
  ******************************************************************************/
 void BTA_AgSetCodec(uint16_t handle, tBTA_AG_PEER_CODEC codec);
+
+void BTA_AgSetScoAllowed(bool value);
 
 #endif /* BTA_AG_API_H */

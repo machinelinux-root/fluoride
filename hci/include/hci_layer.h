@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- *  Copyright (C) 2014 Google, Inc.
+ *  Copyright 2014 Google, Inc.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -18,11 +18,12 @@
 
 #pragma once
 
+#include <base/bind.h>
+#include <base/tracked_objects.h>
 #include <stdbool.h>
 
 #include "bt_types.h"
 #include "osi/include/allocator.h"
-#include "osi/include/data_dispatcher.h"
 #include "osi/include/fixed_queue.h"
 #include "osi/include/future.h"
 #include "osi/include/osi.h"
@@ -58,36 +59,19 @@ typedef struct controller_t controller_t;
 typedef struct hci_inject_t hci_inject_t;
 typedef struct packet_fragmenter_t packet_fragmenter_t;
 typedef struct vendor_t vendor_t;
-typedef struct low_power_manager_t low_power_manager_t;
 
 typedef unsigned char* bdaddr_t;
 typedef uint16_t command_opcode_t;
-
-typedef enum {
-  LPM_DISABLE,
-  LPM_ENABLE,
-  LPM_WAKE_ASSERT,
-  LPM_WAKE_DEASSERT
-} low_power_command_t;
 
 typedef void (*command_complete_cb)(BT_HDR* response, void* context);
 typedef void (*command_status_cb)(uint8_t status, BT_HDR* command,
                                   void* context);
 
 typedef struct hci_t {
-  // Send a low power command, if supported and the low power manager is
-  // enabled.
-  void (*send_low_power_command)(low_power_command_t command);
-
-  // Do the postload sequence (call after the rest of the BT stack initializes).
-  void (*do_postload)(void);
-
-  // Register with this data dispatcher to receive events flowing upward out of
-  // the HCI layer
-  data_dispatcher_t* event_dispatcher;
-
-  // Set the queue to receive ACL data in
-  void (*set_data_queue)(fixed_queue_t* queue);
+  // Set the callback that the HCI layer uses to send data upwards
+  void (*set_data_cb)(
+      base::Callback<void(const tracked_objects::Location&, BT_HDR*)>
+          send_data_cb);
 
   // Send a command through the HCI layer
   void (*transmit_command)(BT_HDR* command,
@@ -97,17 +81,17 @@ typedef struct hci_t {
   future_t* (*transmit_command_futured)(BT_HDR* command);
 
   // Send some data downward through the HCI layer
-  void (*transmit_downward)(data_dispatcher_type_t type, void* data);
+  void (*transmit_downward)(uint16_t type, void* data);
 } hci_t;
 
 const hci_t* hci_layer_get_interface();
 
 const hci_t* hci_layer_get_test_interface(
     const allocator_t* buffer_allocator_interface,
-    const hci_hal_t* hal_interface, const btsnoop_t* btsnoop_interface,
-    const hci_inject_t* hci_inject_interface,
-    const packet_fragmenter_t* packet_fragmenter_interface,
-    const vendor_t* vendor_interface,
-    const low_power_manager_t* low_power_manager_interface);
+    const btsnoop_t* btsnoop_interface,
+    const packet_fragmenter_t* packet_fragmenter_interface);
+
+void post_to_hci_message_loop(const tracked_objects::Location& from_here,
+                              BT_HDR* p_msg);
 
 void hci_layer_cleanup_interface();

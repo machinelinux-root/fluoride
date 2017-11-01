@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016 The Android Open Source Project
+ * Copyright 2016 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -70,10 +70,14 @@ static const tA2DP_APTX_CIE a2dp_aptx_default_config = {
 };
 
 static const tA2DP_ENCODER_INTERFACE a2dp_encoder_interface_aptx = {
-    a2dp_vendor_aptx_encoder_init,  a2dp_vendor_aptx_encoder_cleanup,
-    a2dp_vendor_aptx_feeding_init,  a2dp_vendor_aptx_feeding_reset,
-    a2dp_vendor_aptx_feeding_flush, a2dp_vendor_aptx_get_encoder_interval_ms,
-    a2dp_vendor_aptx_send_frames,   a2dp_vendor_aptx_debug_codec_dump};
+    a2dp_vendor_aptx_encoder_init,
+    a2dp_vendor_aptx_encoder_cleanup,
+    a2dp_vendor_aptx_feeding_reset,
+    a2dp_vendor_aptx_feeding_flush,
+    a2dp_vendor_aptx_get_encoder_interval_ms,
+    a2dp_vendor_aptx_send_frames,
+    nullptr  // set_transmit_queue_length
+};
 
 UNUSED_ATTR static tA2DP_STATUS A2DP_CodecInfoMatchesCapabilityAptx(
     const tA2DP_APTX_CIE* p_cap, const uint8_t* p_codec_info,
@@ -200,10 +204,10 @@ static tA2DP_STATUS A2DP_CodecInfoMatchesCapabilityAptx(
 
   /* verify that each parameter is in range */
 
-  LOG_DEBUG(LOG_TAG, "%s: FREQ peer: 0x%x, capability 0x%x", __func__,
-            cfg_cie.sampleRate, p_cap->sampleRate);
-  LOG_DEBUG(LOG_TAG, "%s: CH_MODE peer: 0x%x, capability 0x%x", __func__,
-            cfg_cie.channelMode, p_cap->channelMode);
+  LOG_VERBOSE(LOG_TAG, "%s: FREQ peer: 0x%x, capability 0x%x", __func__,
+              cfg_cie.sampleRate, p_cap->sampleRate);
+  LOG_VERBOSE(LOG_TAG, "%s: CH_MODE peer: 0x%x, capability 0x%x", __func__,
+              cfg_cie.channelMode, p_cap->channelMode);
 
   /* sampling frequency */
   if ((cfg_cie.sampleRate & p_cap->sampleRate) == 0) return A2DP_NS_SAMP_FREQ;
@@ -292,20 +296,6 @@ int A2DP_VendorGetTrackSampleRateAptx(const uint8_t* p_codec_info) {
   return -1;
 }
 
-int A2DP_VendorGetTrackBitsPerSampleAptx(const uint8_t* p_codec_info) {
-  tA2DP_APTX_CIE aptx_cie;
-
-  // Check whether the codec info contains valid data
-  tA2DP_STATUS a2dp_status = A2DP_ParseInfoAptx(&aptx_cie, p_codec_info, false);
-  if (a2dp_status != A2DP_SUCCESS) {
-    LOG_ERROR(LOG_TAG, "%s: cannot decode codec information: %d", __func__,
-              a2dp_status);
-    return -1;
-  }
-
-  return 16;  // For aptX we always use 16 bits per audio sample
-}
-
 int A2DP_VendorGetTrackChannelCountAptx(const uint8_t* p_codec_info) {
   tA2DP_APTX_CIE aptx_cie;
 
@@ -342,33 +332,35 @@ bool A2DP_VendorBuildCodecHeaderAptx(UNUSED_ATTR const uint8_t* p_codec_info,
   return true;
 }
 
-void A2DP_VendorDumpCodecInfoAptx(const uint8_t* p_codec_info) {
+bool A2DP_VendorDumpCodecInfoAptx(const uint8_t* p_codec_info) {
   tA2DP_STATUS a2dp_status;
   tA2DP_APTX_CIE aptx_cie;
 
-  LOG_DEBUG(LOG_TAG, "%s", __func__);
+  LOG_VERBOSE(LOG_TAG, "%s", __func__);
 
   a2dp_status = A2DP_ParseInfoAptx(&aptx_cie, p_codec_info, true);
   if (a2dp_status != A2DP_SUCCESS) {
     LOG_ERROR(LOG_TAG, "%s: A2DP_ParseInfoAptx fail:%d", __func__, a2dp_status);
-    return;
+    return false;
   }
 
-  LOG_DEBUG(LOG_TAG, "\tsamp_freq: 0x%x", aptx_cie.sampleRate);
+  LOG_VERBOSE(LOG_TAG, "\tsamp_freq: 0x%x", aptx_cie.sampleRate);
   if (aptx_cie.sampleRate & A2DP_APTX_SAMPLERATE_44100) {
-    LOG_DEBUG(LOG_TAG, "\tsamp_freq: (44100)");
+    LOG_VERBOSE(LOG_TAG, "\tsamp_freq: (44100)");
   }
   if (aptx_cie.sampleRate & A2DP_APTX_SAMPLERATE_48000) {
-    LOG_DEBUG(LOG_TAG, "\tsamp_freq: (48000)");
+    LOG_VERBOSE(LOG_TAG, "\tsamp_freq: (48000)");
   }
 
-  LOG_DEBUG(LOG_TAG, "\tch_mode: 0x%x", aptx_cie.channelMode);
+  LOG_VERBOSE(LOG_TAG, "\tch_mode: 0x%x", aptx_cie.channelMode);
   if (aptx_cie.channelMode & A2DP_APTX_CHANNELS_MONO) {
-    LOG_DEBUG(LOG_TAG, "\tch_mode: (Mono)");
+    LOG_VERBOSE(LOG_TAG, "\tch_mode: (Mono)");
   }
   if (aptx_cie.channelMode & A2DP_APTX_CHANNELS_STEREO) {
-    LOG_DEBUG(LOG_TAG, "\tch_mode: (Stereo)");
+    LOG_VERBOSE(LOG_TAG, "\tch_mode: (Stereo)");
   }
+
+  return true;
 }
 
 const tA2DP_ENCODER_INTERFACE* A2DP_VendorGetEncoderInterfaceAptx(
@@ -412,8 +404,25 @@ bool A2DP_VendorInitCodecConfigAptx(tAVDT_CFG* p_cfg) {
   return true;
 }
 
-A2dpCodecConfigAptx::A2dpCodecConfigAptx()
-    : A2dpCodecConfig(BTAV_A2DP_CODEC_INDEX_SOURCE_APTX, "aptX") {}
+A2dpCodecConfigAptx::A2dpCodecConfigAptx(
+    btav_a2dp_codec_priority_t codec_priority)
+    : A2dpCodecConfig(BTAV_A2DP_CODEC_INDEX_SOURCE_APTX, "aptX",
+                      codec_priority) {
+  // Compute the local capability
+  if (a2dp_aptx_caps.sampleRate & A2DP_APTX_SAMPLERATE_44100) {
+    codec_local_capability_.sample_rate |= BTAV_A2DP_CODEC_SAMPLE_RATE_44100;
+  }
+  if (a2dp_aptx_caps.sampleRate & A2DP_APTX_SAMPLERATE_48000) {
+    codec_local_capability_.sample_rate |= BTAV_A2DP_CODEC_SAMPLE_RATE_48000;
+  }
+  codec_local_capability_.bits_per_sample = a2dp_aptx_caps.bits_per_sample;
+  if (a2dp_aptx_caps.channelMode & A2DP_APTX_CHANNELS_MONO) {
+    codec_local_capability_.channel_mode |= BTAV_A2DP_CODEC_CHANNEL_MODE_MONO;
+  }
+  if (a2dp_aptx_caps.channelMode & A2DP_APTX_CHANNELS_STEREO) {
+    codec_local_capability_.channel_mode |= BTAV_A2DP_CODEC_CHANNEL_MODE_STEREO;
+  }
+}
 
 A2dpCodecConfigAptx::~A2dpCodecConfigAptx() {}
 
@@ -428,6 +437,8 @@ bool A2dpCodecConfigAptx::init() {
 
   return true;
 }
+
+bool A2dpCodecConfigAptx::useRtpHeaderMarkerBit() const { return false; }
 
 //
 // Selects the best sample rate from |sampleRate|.
@@ -579,6 +590,8 @@ bool A2dpCodecConfigAptx::setCodecConfig(const uint8_t* p_peer_codec_info,
   // Save the internal state
   btav_a2dp_codec_config_t saved_codec_config = codec_config_;
   btav_a2dp_codec_config_t saved_codec_capability = codec_capability_;
+  btav_a2dp_codec_config_t saved_codec_selectable_capability =
+      codec_selectable_capability_;
   btav_a2dp_codec_config_t saved_codec_user_config = codec_user_config_;
   btav_a2dp_codec_config_t saved_codec_audio_config = codec_audio_config_;
   uint8_t saved_ota_codec_config[AVDT_CODEC_SIZE];
@@ -637,6 +650,16 @@ bool A2dpCodecConfigAptx::setCodecConfig(const uint8_t* p_peer_codec_info,
 
   // Select the sample frequency if there is no user preference
   do {
+    // Compute the selectable capability
+    if (sampleRate & A2DP_APTX_SAMPLERATE_44100) {
+      codec_selectable_capability_.sample_rate |=
+          BTAV_A2DP_CODEC_SAMPLE_RATE_44100;
+    }
+    if (sampleRate & A2DP_APTX_SAMPLERATE_48000) {
+      codec_selectable_capability_.sample_rate |=
+          BTAV_A2DP_CODEC_SAMPLE_RATE_48000;
+    }
+
     if (codec_config_.sample_rate != BTAV_A2DP_CODEC_SAMPLE_RATE_NONE) break;
 
     // Compute the common capability
@@ -693,6 +716,10 @@ bool A2dpCodecConfigAptx::setCodecConfig(const uint8_t* p_peer_codec_info,
 
   // Select the bits per sample if there is no user preference
   do {
+    // Compute the selectable capability
+    codec_selectable_capability_.bits_per_sample =
+        a2dp_aptx_caps.bits_per_sample;
+
     if (codec_config_.bits_per_sample != BTAV_A2DP_CODEC_BITS_PER_SAMPLE_NONE)
       break;
 
@@ -750,6 +777,16 @@ bool A2dpCodecConfigAptx::setCodecConfig(const uint8_t* p_peer_codec_info,
 
   // Select the channel mode if there is no user preference
   do {
+    // Compute the selectable capability
+    if (channelMode & A2DP_APTX_CHANNELS_MONO) {
+      codec_selectable_capability_.channel_mode |=
+          BTAV_A2DP_CODEC_CHANNEL_MODE_MONO;
+    }
+    if (channelMode & A2DP_APTX_CHANNELS_STEREO) {
+      codec_selectable_capability_.channel_mode |=
+          BTAV_A2DP_CODEC_CHANNEL_MODE_STEREO;
+    }
+
     if (codec_config_.channel_mode != BTAV_A2DP_CODEC_CHANNEL_MODE_NONE) break;
 
     // Compute the common capability
@@ -828,6 +865,7 @@ fail:
   // Restore the internal state
   codec_config_ = saved_codec_config;
   codec_capability_ = saved_codec_capability;
+  codec_selectable_capability_ = saved_codec_selectable_capability;
   codec_user_config_ = saved_codec_user_config;
   codec_audio_config_ = saved_codec_audio_config;
   memcpy(ota_codec_config_, saved_ota_codec_config, sizeof(ota_codec_config_));

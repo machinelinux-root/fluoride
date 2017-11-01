@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- *  Copyright (C) 2016 Google, Inc.
+ *  Copyright 2016 Google, Inc.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -162,7 +162,7 @@ void BluetoothMetricsLogger::LogBluetoothSessionStart(
 }
 
 void BluetoothMetricsLogger::LogBluetoothSessionEnd(
-    const std::string& disconnect_reason, uint64_t timestamp_ms) {
+    disconnect_reason_t disconnect_reason, uint64_t timestamp_ms) {
   // TODO(siyuanh): Implement for linux
 }
 

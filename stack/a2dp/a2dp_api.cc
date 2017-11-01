@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- *  Copyright (C) 2002-2012 Broadcom Corporation
+ *  Copyright 2002-2012 Broadcom Corporation
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -35,10 +35,17 @@
 #include "osi/include/log.h"
 #include "sdpdefs.h"
 
+using bluetooth::Uuid;
+
 /*****************************************************************************
  *  Global data
  ****************************************************************************/
 tA2DP_CB a2dp_cb;
+static uint16_t a2dp_attr_list[] = {
+    ATTR_ID_SERVICE_CLASS_ID_LIST, /* update A2DP_NUM_ATTR, if changed */
+    ATTR_ID_BT_PROFILE_DESC_LIST,  ATTR_ID_SUPPORTED_FEATURES,
+    ATTR_ID_SERVICE_NAME,          ATTR_ID_PROTOCOL_DESC_LIST,
+    ATTR_ID_PROVIDER_NAME};
 
 /******************************************************************************
  *
@@ -261,16 +268,10 @@ tA2DP_STATUS A2DP_AddRecord(uint16_t service_uuid, char* p_service_name,
  *                  A2DP_FAIL if function execution failed.
  *
  *****************************************************************************/
-tA2DP_STATUS A2DP_FindService(uint16_t service_uuid, BD_ADDR bd_addr,
+tA2DP_STATUS A2DP_FindService(uint16_t service_uuid, const RawAddress& bd_addr,
                               tA2DP_SDP_DB_PARAMS* p_db,
                               tA2DP_FIND_CBACK* p_cback) {
-  tSDP_UUID uuid_list;
   bool result = true;
-  uint16_t a2dp_attr_list[] = {
-      ATTR_ID_SERVICE_CLASS_ID_LIST, /* update A2DP_NUM_ATTR, if changed */
-      ATTR_ID_BT_PROFILE_DESC_LIST,  ATTR_ID_SUPPORTED_FEATURES,
-      ATTR_ID_SERVICE_NAME,          ATTR_ID_PROTOCOL_DESC_LIST,
-      ATTR_ID_PROVIDER_NAME};
 
   LOG_VERBOSE(LOG_TAG, "%s: uuid: 0x%x", __func__, service_uuid);
   if ((service_uuid != UUID_SERVCLASS_AUDIO_SOURCE &&
@@ -282,10 +283,6 @@ tA2DP_STATUS A2DP_FindService(uint16_t service_uuid, BD_ADDR bd_addr,
       a2dp_cb.find.service_uuid == UUID_SERVCLASS_AUDIO_SINK)
     return A2DP_BUSY;
 
-  /* set up discovery database */
-  uuid_list.len = LEN_UUID_16;
-  uuid_list.uu.uuid16 = service_uuid;
-
   if (p_db->p_attrs == NULL || p_db->num_attr == 0) {
     p_db->p_attrs = a2dp_attr_list;
     p_db->num_attr = A2DP_NUM_ATTR;
@@ -294,10 +291,11 @@ tA2DP_STATUS A2DP_FindService(uint16_t service_uuid, BD_ADDR bd_addr,
   if (a2dp_cb.find.p_db == NULL)
     a2dp_cb.find.p_db = (tSDP_DISCOVERY_DB*)osi_malloc(p_db->db_len);
 
+  Uuid uuid_list = Uuid::From16Bit(service_uuid);
   result = SDP_InitDiscoveryDb(a2dp_cb.find.p_db, p_db->db_len, 1, &uuid_list,
                                p_db->num_attr, p_db->p_attrs);
 
-  if (result == true) {
+  if (result) {
     /* store service_uuid */
     a2dp_cb.find.service_uuid = service_uuid;
     a2dp_cb.find.p_cback = p_cback;
@@ -305,7 +303,7 @@ tA2DP_STATUS A2DP_FindService(uint16_t service_uuid, BD_ADDR bd_addr,
     /* perform service search */
     result = SDP_ServiceSearchAttributeRequest(bd_addr, a2dp_cb.find.p_db,
                                                a2dp_sdp_cback);
-    if (false == result) {
+    if (!result) {
       a2dp_cb.find.service_uuid = 0;
     }
   }
@@ -348,16 +346,10 @@ uint8_t A2DP_SetTraceLevel(uint8_t new_level) {
  *                  A2DP_SET_ZERO_BIT, if all bits clear
  *                  A2DP_SET_MULTL_BIT, if multiple bits are set
  *****************************************************************************/
-uint8_t A2DP_BitsSet(uint8_t num) {
-  uint8_t count;
-  uint8_t res;
-  if (num == 0)
-    res = A2DP_SET_ZERO_BIT;
-  else {
-    count = (num & (num - 1));
-    res = ((count == 0) ? A2DP_SET_ONE_BIT : A2DP_SET_MULTL_BIT);
-  }
-  return res;
+uint8_t A2DP_BitsSet(uint64_t num) {
+  if (num == 0) return A2DP_SET_ZERO_BIT;
+  if ((num & (num - 1)) == 0) return A2DP_SET_ONE_BIT;
+  return A2DP_SET_MULTL_BIT;
 }
 
 /*******************************************************************************
@@ -383,3 +375,5 @@ void A2DP_Init(void) {
   a2dp_cb.trace_level = BT_TRACE_LEVEL_NONE;
 #endif
 }
+
+uint16_t A2DP_GetAvdtpVersion() { return a2dp_cb.avdt_sdp_ver; }

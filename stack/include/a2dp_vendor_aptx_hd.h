@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016 The Android Open Source Project
+ * Copyright 2016 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,18 +27,21 @@
 
 class A2dpCodecConfigAptxHd : public A2dpCodecConfig {
  public:
-  A2dpCodecConfigAptxHd();
+  A2dpCodecConfigAptxHd(btav_a2dp_codec_priority_t codec_priority);
   virtual ~A2dpCodecConfigAptxHd();
 
   bool init() override;
+  period_ms_t encoderIntervalMs() const override;
   bool setCodecConfig(const uint8_t* p_peer_codec_info, bool is_capability,
                       uint8_t* p_result_codec_config) override;
 
  private:
+  bool useRtpHeaderMarkerBit() const override;
   bool updateEncoderUserConfig(
       const tA2DP_ENCODER_INIT_PEER_PARAMS* p_peer_params,
       bool* p_restart_input, bool* p_restart_output,
       bool* p_config_updated) override;
+  void debug_codec_dump(int fd) override;
 };
 
 // Checks whether the codec capabilities contain a valid A2DP aptX-HD Source
@@ -85,12 +88,6 @@ bool A2DP_VendorCodecEqualsAptxHd(const uint8_t* p_codec_info_a,
 // contains invalid codec information.
 int A2DP_VendorGetTrackSampleRateAptxHd(const uint8_t* p_codec_info);
 
-// Gets the bits per audio sample for the A2DP aptX-HD codec.
-// |p_codec_info| is a pointer to the aptX-HD codec_info to decode.
-// Returns the bits per audio sample on success, or -1 if |p_codec_info|
-// contains invalid codec information.
-int A2DP_VendorGetTrackBitsPerSampleAptxHd(const uint8_t* p_codec_info);
-
 // Gets the channel count for the A2DP aptX-HD codec.
 // |p_codec_info| is a pointer to the aptX-HD codec_info to decode.
 // Returns the channel count on success, or -1 if |p_codec_info|
@@ -115,9 +112,10 @@ bool A2DP_VendorBuildCodecHeaderAptxHd(const uint8_t* p_codec_info,
                                        BT_HDR* p_buf,
                                        uint16_t frames_per_packet);
 
-// Decodes and displays aptX-HD codec info (for debugging).
+// Decodes and displays A2DP aptX-HD codec info when using |LOG_DEBUG|.
 // |p_codec_info| is a pointer to the aptX-HD codec_info to decode and display.
-void A2DP_VendorDumpCodecInfoAptxHd(const uint8_t* p_codec_info);
+// Returns true if the codec information is valid, otherwise false.
+bool A2DP_VendorDumpCodecInfoAptxHd(const uint8_t* p_codec_info);
 
 // Gets the A2DP aptX-HD encoder interface that can be used to encode and
 // prepare A2DP packets for transmission - see |tA2DP_ENCODER_INTERFACE|.

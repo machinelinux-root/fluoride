@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- *  Copyright (C) 2001-2012 Broadcom Corporation
+ *  Copyright 2001-2012 Broadcom Corporation
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -33,7 +33,7 @@
 #include "device/include/controller.h"
 #include "osi/include/osi.h"
 
-extern fixed_queue_t* btu_general_alarm_queue;
+using bluetooth::Uuid;
 
 /******************************************************************************/
 /*            L O C A L    F U N C T I O N     P R O T O T Y P E S            */
@@ -80,15 +80,14 @@ tBNEP_CONN* bnepu_find_bcb_by_cid(uint16_t cid) {
  * Returns          the BCB address, or NULL if not found.
  *
  ******************************************************************************/
-tBNEP_CONN* bnepu_find_bcb_by_bd_addr(uint8_t* p_bda) {
+tBNEP_CONN* bnepu_find_bcb_by_bd_addr(const RawAddress& p_bda) {
   uint16_t xx;
   tBNEP_CONN* p_bcb;
 
   /* Look through each connection control block */
   for (xx = 0, p_bcb = bnep_cb.bcb; xx < BNEP_MAX_CONNECTIONS; xx++, p_bcb++) {
     if (p_bcb->con_state != BNEP_STATE_IDLE) {
-      if (!memcmp((uint8_t*)(p_bcb->rem_bda), p_bda, BD_ADDR_LEN))
-        return (p_bcb);
+      if (p_bcb->rem_bda == p_bda) return (p_bcb);
     }
   }
 
@@ -105,7 +104,7 @@ tBNEP_CONN* bnepu_find_bcb_by_bd_addr(uint8_t* p_bda) {
  * Returns          BCB address, or NULL if none available.
  *
  ******************************************************************************/
-tBNEP_CONN* bnepu_allocate_bcb(BD_ADDR p_rem_bda) {
+tBNEP_CONN* bnepu_allocate_bcb(const RawAddress& p_rem_bda) {
   uint16_t xx;
   tBNEP_CONN* p_bcb;
 
@@ -116,7 +115,7 @@ tBNEP_CONN* bnepu_allocate_bcb(BD_ADDR p_rem_bda) {
       memset((uint8_t*)p_bcb, 0, sizeof(tBNEP_CONN));
       p_bcb->conn_timer = alarm_new("bnep.conn_timer");
 
-      memcpy((uint8_t*)(p_bcb->rem_bda), (uint8_t*)p_rem_bda, BD_ADDR_LEN);
+      p_bcb->rem_bda = p_rem_bda;
       p_bcb->handle = xx + 1;
       p_bcb->xmit_q = fixed_queue_new(SIZE_MAX);
 
@@ -144,7 +143,7 @@ void bnepu_release_bcb(tBNEP_CONN* p_bcb) {
 
   /* Drop any response pointer we may be holding */
   p_bcb->con_state = BNEP_STATE_IDLE;
-  p_bcb->p_pending_data = NULL;
+  osi_free_and_reset((void**)&p_bcb->p_pending_data);
 
   /* Free transmit queue */
   while (!fixed_queue_is_empty(p_bcb->xmit_q)) {
@@ -167,8 +166,8 @@ void bnep_send_conn_req(tBNEP_CONN* p_bcb) {
   BT_HDR* p_buf = (BT_HDR*)osi_malloc(BNEP_BUF_SIZE);
   uint8_t *p, *p_start;
 
-  BNEP_TRACE_DEBUG("%s: sending setup req with dst uuid %x", __func__,
-                   p_bcb->dst_uuid.uu.uuid16);
+  BNEP_TRACE_DEBUG("%s: sending setup req with dst uuid %s", __func__,
+                   p_bcb->dst_uuid.ToString().c_str());
 
   p_buf->offset = L2CAP_MIN_OFFSET;
   p = p_start = (uint8_t*)(p_buf + 1) + L2CAP_MIN_OFFSET;
@@ -179,22 +178,26 @@ void bnep_send_conn_req(tBNEP_CONN* p_bcb) {
   /* Put in filter message type - set filters */
   UINT8_TO_BE_STREAM(p, BNEP_SETUP_CONNECTION_REQUEST_MSG);
 
-  UINT8_TO_BE_STREAM(p, p_bcb->dst_uuid.len);
+  int len = std::max(p_bcb->dst_uuid.GetShortestRepresentationSize(),
+                     p_bcb->src_uuid.GetShortestRepresentationSize());
 
-  if (p_bcb->dst_uuid.len == 2) {
-    UINT16_TO_BE_STREAM(p, p_bcb->dst_uuid.uu.uuid16);
-    UINT16_TO_BE_STREAM(p, p_bcb->src_uuid.uu.uuid16);
-  } else if (p_bcb->dst_uuid.len == 4) {
-    UINT32_TO_BE_STREAM(p, p_bcb->dst_uuid.uu.uuid32);
-    UINT32_TO_BE_STREAM(p, p_bcb->src_uuid.uu.uuid32);
-  } else if (p_bcb->dst_uuid.len == 16) {
-    memcpy(p, p_bcb->dst_uuid.uu.uuid128, p_bcb->dst_uuid.len);
-    p += p_bcb->dst_uuid.len;
-    memcpy(p, p_bcb->src_uuid.uu.uuid128, p_bcb->dst_uuid.len);
-    p += p_bcb->dst_uuid.len;
+  UINT8_TO_BE_STREAM(p, len);
+
+  if (len == Uuid::kNumBytes16) {
+    UINT16_TO_BE_STREAM(p, p_bcb->dst_uuid.As16Bit());
+    UINT16_TO_BE_STREAM(p, p_bcb->src_uuid.As16Bit());
+  } else if (len == Uuid::kNumBytes32) {
+    UINT32_TO_BE_STREAM(p, p_bcb->dst_uuid.As32Bit());
+    UINT32_TO_BE_STREAM(p, p_bcb->src_uuid.As32Bit());
+  } else if (len == Uuid::kNumBytes128) {
+    memcpy(p, p_bcb->dst_uuid.To128BitBE().data(), Uuid::kNumBytes128);
+    p += Uuid::kNumBytes128;
+    memcpy(p, p_bcb->src_uuid.To128BitBE().data(), Uuid::kNumBytes128);
+    p += Uuid::kNumBytes128;
   } else {
-    BNEP_TRACE_ERROR("%s: uuid: %x, invalid length: %x", __func__,
-                     p_bcb->dst_uuid.uu.uuid16, p_bcb->dst_uuid.len);
+    BNEP_TRACE_ERROR("%s: uuid: %s, invalid length: %zu", __func__,
+                     p_bcb->dst_uuid.ToString().c_str(),
+                     p_bcb->dst_uuid.GetShortestRepresentationSize());
   }
 
   p_buf->len = (uint16_t)(p - p_start);
@@ -272,8 +275,8 @@ void bnepu_send_peer_our_filters(tBNEP_CONN* p_bcb) {
   p_bcb->con_flags |= BNEP_FLAGS_FILTER_RESP_PEND;
 
   /* Start timer waiting for setup response */
-  alarm_set_on_queue(p_bcb->conn_timer, BNEP_FILTER_SET_TIMEOUT_MS,
-                     bnep_conn_timer_timeout, p_bcb, btu_general_alarm_queue);
+  alarm_set_on_mloop(p_bcb->conn_timer, BNEP_FILTER_SET_TIMEOUT_MS,
+                     bnep_conn_timer_timeout, p_bcb);
 }
 
 /*******************************************************************************
@@ -303,9 +306,9 @@ void bnepu_send_peer_our_multi_filters(tBNEP_CONN* p_bcb) {
 
   UINT16_TO_BE_STREAM(p, (2 * BD_ADDR_LEN * p_bcb->sent_mcast_filters));
   for (xx = 0; xx < p_bcb->sent_mcast_filters; xx++) {
-    memcpy(p, p_bcb->sent_mcast_filter_start[xx], BD_ADDR_LEN);
+    memcpy(p, p_bcb->sent_mcast_filter_start[xx].address, BD_ADDR_LEN);
     p += BD_ADDR_LEN;
-    memcpy(p, p_bcb->sent_mcast_filter_end[xx], BD_ADDR_LEN);
+    memcpy(p, p_bcb->sent_mcast_filter_end[xx].address, BD_ADDR_LEN);
     p += BD_ADDR_LEN;
   }
 
@@ -316,8 +319,8 @@ void bnepu_send_peer_our_multi_filters(tBNEP_CONN* p_bcb) {
   p_bcb->con_flags |= BNEP_FLAGS_MULTI_RESP_PEND;
 
   /* Start timer waiting for setup response */
-  alarm_set_on_queue(p_bcb->conn_timer, BNEP_FILTER_SET_TIMEOUT_MS,
-                     bnep_conn_timer_timeout, p_bcb, btu_general_alarm_queue);
+  alarm_set_on_mloop(p_bcb->conn_timer, BNEP_FILTER_SET_TIMEOUT_MS,
+                     bnep_conn_timer_timeout, p_bcb);
 }
 
 /*******************************************************************************
@@ -424,34 +427,33 @@ void bnepu_check_send_packet(tBNEP_CONN* p_bcb, BT_HDR* p_buf) {
  *
  ******************************************************************************/
 void bnepu_build_bnep_hdr(tBNEP_CONN* p_bcb, BT_HDR* p_buf, uint16_t protocol,
-                          uint8_t* p_src_addr, uint8_t* p_dest_addr,
-                          bool fw_ext_present) {
+                          const RawAddress* p_src_addr,
+                          const RawAddress* p_dest_addr, bool fw_ext_present) {
   const controller_t* controller = controller_get_interface();
-  uint8_t ext_bit, *p = (uint8_t *)NULL;
+  uint8_t ext_bit, *p = (uint8_t*)NULL;
   uint8_t type = BNEP_FRAME_COMPRESSED_ETHERNET;
 
   ext_bit = fw_ext_present ? 0x80 : 0x00;
 
-  if ((p_src_addr) &&
-      (memcmp(p_src_addr, &controller->get_address()->address, BD_ADDR_LEN)))
+  if (p_src_addr && *p_src_addr != *controller->get_address())
     type = BNEP_FRAME_COMPRESSED_ETHERNET_SRC_ONLY;
 
-  if (memcmp(p_dest_addr, p_bcb->rem_bda, BD_ADDR_LEN))
+  if (*p_dest_addr != p_bcb->rem_bda)
     type = (type == BNEP_FRAME_COMPRESSED_ETHERNET)
                ? BNEP_FRAME_COMPRESSED_ETHERNET_DEST_ONLY
                : BNEP_FRAME_GENERAL_ETHERNET;
 
-  if (!p_src_addr) p_src_addr = (uint8_t*)controller->get_address();
+  if (!p_src_addr) p_src_addr = controller->get_address();
 
   switch (type) {
     case BNEP_FRAME_GENERAL_ETHERNET:
       p = bnepu_init_hdr(p_buf, 15,
                          (uint8_t)(ext_bit | BNEP_FRAME_GENERAL_ETHERNET));
 
-      memcpy(p, p_dest_addr, BD_ADDR_LEN);
+      memcpy(p, p_dest_addr->address, BD_ADDR_LEN);
       p += BD_ADDR_LEN;
 
-      memcpy(p, p_src_addr, BD_ADDR_LEN);
+      memcpy(p, p_src_addr->address, BD_ADDR_LEN);
       p += BD_ADDR_LEN;
       break;
 
@@ -465,7 +467,7 @@ void bnepu_build_bnep_hdr(tBNEP_CONN* p_bcb, BT_HDR* p_buf, uint16_t protocol,
           p_buf, 9,
           (uint8_t)(ext_bit | BNEP_FRAME_COMPRESSED_ETHERNET_SRC_ONLY));
 
-      memcpy(p, p_src_addr, BD_ADDR_LEN);
+      memcpy(p, p_src_addr->address, BD_ADDR_LEN);
       p += BD_ADDR_LEN;
       break;
 
@@ -474,7 +476,7 @@ void bnepu_build_bnep_hdr(tBNEP_CONN* p_bcb, BT_HDR* p_buf, uint16_t protocol,
           p_buf, 9,
           (uint8_t)(ext_bit | BNEP_FRAME_COMPRESSED_ETHERNET_DEST_ONLY));
 
-      memcpy(p, p_dest_addr, BD_ADDR_LEN);
+      memcpy(p, p_dest_addr->address, BD_ADDR_LEN);
       p += BD_ADDR_LEN;
       break;
   }
@@ -527,8 +529,7 @@ static uint8_t* bnepu_init_hdr(BT_HDR* p_buf, uint16_t hdr_len,
  ******************************************************************************/
 void bnep_process_setup_conn_req(tBNEP_CONN* p_bcb, uint8_t* p_setup,
                                  uint8_t len) {
-  BNEP_TRACE_EVENT("BNEP - bnep_process_setup_conn_req for CID: 0x%x",
-                   p_bcb->l2cap_cid);
+  BNEP_TRACE_EVENT("BNEP - %s for CID: 0x%x", __func__, p_bcb->l2cap_cid);
 
   if (p_bcb->con_state != BNEP_STATE_CONN_SETUP &&
       p_bcb->con_state != BNEP_STATE_SEC_CHECKING &&
@@ -557,36 +558,43 @@ void bnep_process_setup_conn_req(tBNEP_CONN* p_bcb, uint8_t* p_setup,
   }
 
   if (p_bcb->con_state == BNEP_STATE_CONNECTED) {
-    memcpy((uint8_t*)&(p_bcb->prv_src_uuid), (uint8_t*)&(p_bcb->src_uuid),
-           sizeof(tBT_UUID));
-    memcpy((uint8_t*)&(p_bcb->prv_dst_uuid), (uint8_t*)&(p_bcb->dst_uuid),
-           sizeof(tBT_UUID));
+    p_bcb->prv_src_uuid = p_bcb->src_uuid;
+    p_bcb->prv_dst_uuid = p_bcb->dst_uuid;
   }
 
-  p_bcb->dst_uuid.len = p_bcb->src_uuid.len = len;
-
-  if (p_bcb->dst_uuid.len == 2) {
+  if (len == Uuid::kNumBytes16) {
     /* because peer initiated connection keep src uuid as dst uuid */
-    BE_STREAM_TO_UINT16(p_bcb->src_uuid.uu.uuid16, p_setup);
-    BE_STREAM_TO_UINT16(p_bcb->dst_uuid.uu.uuid16, p_setup);
+    uint16_t tmp;
+
+    BE_STREAM_TO_UINT16(tmp, p_setup);
+    p_bcb->src_uuid = Uuid::From16Bit(tmp);
+
+    BE_STREAM_TO_UINT16(tmp, p_setup);
+    p_bcb->dst_uuid = Uuid::From16Bit(tmp);
 
     /* If nothing has changed don't bother the profile */
     if (p_bcb->con_state == BNEP_STATE_CONNECTED &&
-        p_bcb->src_uuid.uu.uuid16 == p_bcb->prv_src_uuid.uu.uuid16 &&
-        p_bcb->dst_uuid.uu.uuid16 == p_bcb->prv_dst_uuid.uu.uuid16) {
+        p_bcb->src_uuid == p_bcb->prv_src_uuid &&
+        p_bcb->dst_uuid == p_bcb->prv_dst_uuid) {
       bnep_send_conn_responce(p_bcb, BNEP_SETUP_CONN_OK);
       return;
     }
-  } else if (p_bcb->dst_uuid.len == 4) {
-    BE_STREAM_TO_UINT32(p_bcb->src_uuid.uu.uuid32, p_setup);
-    BE_STREAM_TO_UINT32(p_bcb->dst_uuid.uu.uuid32, p_setup);
-  } else if (p_bcb->dst_uuid.len == 16) {
-    memcpy(p_bcb->src_uuid.uu.uuid128, p_setup, p_bcb->src_uuid.len);
-    p_setup += p_bcb->src_uuid.len;
-    memcpy(p_bcb->dst_uuid.uu.uuid128, p_setup, p_bcb->dst_uuid.len);
-    p_setup += p_bcb->dst_uuid.len;
+  } else if (len == Uuid::kNumBytes32) {
+    uint32_t tmp;
+
+    BE_STREAM_TO_UINT32(tmp, p_setup);
+    p_bcb->src_uuid = Uuid::From32Bit(tmp);
+
+    BE_STREAM_TO_UINT32(tmp, p_setup);
+    p_bcb->dst_uuid = Uuid::From32Bit(tmp);
+  } else if (len == Uuid::kNumBytes128) {
+    p_bcb->src_uuid = Uuid::From128BitBE(p_setup);
+    p_setup += len;
+
+    p_bcb->dst_uuid = Uuid::From128BitBE(p_setup);
+    p_setup += len;
   } else {
-    BNEP_TRACE_ERROR("BNEP - Bad UID len %d in ConnReq", p_bcb->dst_uuid.len);
+    BNEP_TRACE_ERROR("BNEP - Bad UID len %d in ConnReq", len);
     bnep_send_conn_responce(p_bcb, BNEP_SETUP_INVALID_UUID_SIZE);
     return;
   }
@@ -595,16 +603,16 @@ void bnep_process_setup_conn_req(tBNEP_CONN* p_bcb, uint8_t* p_setup,
   p_bcb->con_flags |= BNEP_FLAGS_SETUP_RCVD;
 
   BNEP_TRACE_EVENT(
-      "BNEP initiating security check for incoming call for uuid 0x%x",
-      p_bcb->src_uuid.uu.uuid16);
+      "BNEP initiating security check for incoming call for uuid %s",
+      p_bcb->src_uuid.ToString().c_str());
 #if (BNEP_DO_AUTH_FOR_ROLE_SWITCH == FALSE)
   if (p_bcb->con_flags & BNEP_FLAGS_CONN_COMPLETED)
     bnep_sec_check_complete(p_bcb->rem_bda, p_bcb, BTM_SUCCESS);
   else
 #endif
-    btm_sec_mx_access_request(
-        p_bcb->rem_bda, BT_PSM_BNEP, false, BTM_SEC_PROTO_BNEP,
-        bnep_get_uuid32(&(p_bcb->src_uuid)), &bnep_sec_check_complete, p_bcb);
+    btm_sec_mx_access_request(p_bcb->rem_bda, BT_PSM_BNEP, false,
+                              BTM_SEC_PROTO_BNEP, p_bcb->src_uuid.As32Bit(),
+                              &bnep_sec_check_complete, p_bcb);
 
   return;
 }
@@ -668,10 +676,8 @@ void bnep_process_setup_conn_responce(tBNEP_CONN* p_bcb, uint8_t* p_setup) {
       /* Restore the earlier BNEP status */
       p_bcb->con_state = BNEP_STATE_CONNECTED;
       p_bcb->con_flags &= (~BNEP_FLAGS_SETUP_RCVD);
-      memcpy((uint8_t*)&(p_bcb->src_uuid), (uint8_t*)&(p_bcb->prv_src_uuid),
-             sizeof(tBT_UUID));
-      memcpy((uint8_t*)&(p_bcb->dst_uuid), (uint8_t*)&(p_bcb->prv_dst_uuid),
-             sizeof(tBT_UUID));
+      p_bcb->src_uuid = p_bcb->prv_src_uuid;
+      p_bcb->dst_uuid = p_bcb->prv_dst_uuid;
 
       /* Ensure timer is stopped */
       alarm_cancel(p_bcb->conn_timer);
@@ -714,25 +720,41 @@ void bnep_process_setup_conn_responce(tBNEP_CONN* p_bcb, uint8_t* p_setup) {
 uint8_t* bnep_process_control_packet(tBNEP_CONN* p_bcb, uint8_t* p,
                                      uint16_t* rem_len, bool is_ext) {
   uint8_t control_type;
-  bool bad_pkt = false;
   uint16_t len, ext_len = 0;
 
+  if (p == NULL || rem_len == NULL) {
+    if (rem_len != NULL) *rem_len = 0;
+    BNEP_TRACE_DEBUG("%s: invalid packet: p = %p rem_len = %p", __func__, p,
+                     rem_len);
+    return NULL;
+  }
+  uint16_t rem_len_orig = *rem_len;
+
   if (is_ext) {
+    if (*rem_len < 1) goto bad_packet_length;
     ext_len = *p++;
     *rem_len = *rem_len - 1;
   }
 
+  if (*rem_len < 1) goto bad_packet_length;
   control_type = *p++;
   *rem_len = *rem_len - 1;
 
   BNEP_TRACE_EVENT(
-      "BNEP processing control packet rem_len %d, is_ext %d, ctrl_type %d",
-      *rem_len, is_ext, control_type);
+      "%s: BNEP processing control packet rem_len %d, is_ext %d, ctrl_type %d",
+      __func__, *rem_len, is_ext, control_type);
 
   switch (control_type) {
     case BNEP_CONTROL_COMMAND_NOT_UNDERSTOOD:
-      BNEP_TRACE_ERROR("BNEP Received Cmd not understood for ctl pkt type: %d",
-                       *p);
+      if (*rem_len < 1) {
+        BNEP_TRACE_ERROR(
+            "%s: Received BNEP_CONTROL_COMMAND_NOT_UNDERSTOOD with bad length",
+            __func__);
+        goto bad_packet_length;
+      }
+      BNEP_TRACE_ERROR(
+          "%s: Received BNEP_CONTROL_COMMAND_NOT_UNDERSTOOD for pkt type: %d",
+          __func__, *p);
       p++;
       *rem_len = *rem_len - 1;
       break;
@@ -740,9 +762,10 @@ uint8_t* bnep_process_control_packet(tBNEP_CONN* p_bcb, uint8_t* p,
     case BNEP_SETUP_CONNECTION_REQUEST_MSG:
       len = *p++;
       if (*rem_len < ((2 * len) + 1)) {
-        bad_pkt = true;
-        BNEP_TRACE_ERROR("BNEP Received Setup message with bad length");
-        break;
+        BNEP_TRACE_ERROR(
+            "%s: Received BNEP_SETUP_CONNECTION_REQUEST_MSG with bad length",
+            __func__);
+        goto bad_packet_length;
       }
       if (!is_ext) bnep_process_setup_conn_req(p_bcb, p, (uint8_t)len);
       p += (2 * len);
@@ -750,6 +773,12 @@ uint8_t* bnep_process_control_packet(tBNEP_CONN* p_bcb, uint8_t* p,
       break;
 
     case BNEP_SETUP_CONNECTION_RESPONSE_MSG:
+      if (*rem_len < 2) {
+        BNEP_TRACE_ERROR(
+            "%s: Received BNEP_SETUP_CONNECTION_RESPONSE_MSG with bad length",
+            __func__);
+        goto bad_packet_length;
+      }
       if (!is_ext) bnep_process_setup_conn_responce(p_bcb, p);
       p += 2;
       *rem_len = *rem_len - 2;
@@ -758,9 +787,10 @@ uint8_t* bnep_process_control_packet(tBNEP_CONN* p_bcb, uint8_t* p,
     case BNEP_FILTER_NET_TYPE_SET_MSG:
       BE_STREAM_TO_UINT16(len, p);
       if (*rem_len < (len + 2)) {
-        bad_pkt = true;
-        BNEP_TRACE_ERROR("BNEP Received Filter set message with bad length");
-        break;
+        BNEP_TRACE_ERROR(
+            "%s: Received BNEP_FILTER_NET_TYPE_SET_MSG with bad length",
+            __func__);
+        goto bad_packet_length;
       }
       bnepu_process_peer_filter_set(p_bcb, p, len);
       p += len;
@@ -768,6 +798,12 @@ uint8_t* bnep_process_control_packet(tBNEP_CONN* p_bcb, uint8_t* p,
       break;
 
     case BNEP_FILTER_NET_TYPE_RESPONSE_MSG:
+      if (*rem_len < 2) {
+        BNEP_TRACE_ERROR(
+            "%s: Received BNEP_FILTER_NET_TYPE_RESPONSE_MSG with bad length",
+            __func__);
+        goto bad_packet_length;
+      }
       bnepu_process_peer_filter_rsp(p_bcb, p);
       p += 2;
       *rem_len = *rem_len - 2;
@@ -776,10 +812,10 @@ uint8_t* bnep_process_control_packet(tBNEP_CONN* p_bcb, uint8_t* p,
     case BNEP_FILTER_MULTI_ADDR_SET_MSG:
       BE_STREAM_TO_UINT16(len, p);
       if (*rem_len < (len + 2)) {
-        bad_pkt = true;
         BNEP_TRACE_ERROR(
-            "BNEP Received Multicast Filter Set message with bad length");
-        break;
+            "%s: Received BNEP_FILTER_MULTI_ADDR_SET_MSG with bad length",
+            __func__);
+        goto bad_packet_length;
       }
       bnepu_process_peer_multicast_filter_set(p_bcb, p, len);
       p += len;
@@ -787,28 +823,37 @@ uint8_t* bnep_process_control_packet(tBNEP_CONN* p_bcb, uint8_t* p,
       break;
 
     case BNEP_FILTER_MULTI_ADDR_RESPONSE_MSG:
+      if (*rem_len < 2) {
+        BNEP_TRACE_ERROR(
+            "%s: Received BNEP_FILTER_MULTI_ADDR_RESPONSE_MSG with bad length",
+            __func__);
+        goto bad_packet_length;
+      }
       bnepu_process_multicast_filter_rsp(p_bcb, p);
       p += 2;
       *rem_len = *rem_len - 2;
       break;
 
     default:
-      BNEP_TRACE_ERROR("BNEP - bad ctl pkt type: %d", control_type);
+      BNEP_TRACE_ERROR("%s: BNEP - bad ctl pkt type: %d", __func__,
+                       control_type);
       bnep_send_command_not_understood(p_bcb, control_type);
-      if (is_ext) {
+      if (is_ext && (ext_len > 0)) {
+        if (*rem_len < (ext_len - 1)) {
+          goto bad_packet_length;
+        }
         p += (ext_len - 1);
         *rem_len -= (ext_len - 1);
       }
       break;
   }
-
-  if (bad_pkt) {
-    BNEP_TRACE_ERROR("BNEP - bad ctl pkt length: %d", *rem_len);
-    *rem_len = 0;
-    return NULL;
-  }
-
   return p;
+
+bad_packet_length:
+  BNEP_TRACE_ERROR("%s: bad control packet length: original=%d remaining=%d",
+                   __func__, rem_len_orig, *rem_len);
+  *rem_len = 0;
+  return NULL;
 }
 
 /*******************************************************************************
@@ -1023,17 +1068,17 @@ void bnepu_process_peer_multicast_filter_set(tBNEP_CONN* p_bcb,
 
   p_bcb->rcvd_mcast_filters = num_filters;
   for (xx = 0; xx < num_filters; xx++) {
-    memcpy(p_bcb->rcvd_mcast_filter_start[xx], p_filters, BD_ADDR_LEN);
-    memcpy(p_bcb->rcvd_mcast_filter_end[xx], p_filters + BD_ADDR_LEN,
+    memcpy(p_bcb->rcvd_mcast_filter_start[xx].address, p_filters, BD_ADDR_LEN);
+    memcpy(p_bcb->rcvd_mcast_filter_end[xx].address, p_filters + BD_ADDR_LEN,
            BD_ADDR_LEN);
     p_filters += (BD_ADDR_LEN * 2);
 
     /* Check if any of the ranges have all zeros as both starting and ending
      * addresses */
-    if ((memcmp(null_bda, p_bcb->rcvd_mcast_filter_start[xx], BD_ADDR_LEN) ==
-         0) &&
-        (memcmp(null_bda, p_bcb->rcvd_mcast_filter_end[xx], BD_ADDR_LEN) ==
-         0)) {
+    if ((memcmp(null_bda, p_bcb->rcvd_mcast_filter_start[xx].address,
+                BD_ADDR_LEN) == 0) &&
+        (memcmp(null_bda, p_bcb->rcvd_mcast_filter_end[xx].address,
+                BD_ADDR_LEN) == 0)) {
       p_bcb->rcvd_mcast_filters = 0xFFFF;
       break;
     }
@@ -1088,7 +1133,7 @@ void bnepu_send_peer_multicast_filter_rsp(tBNEP_CONN* p_bcb,
  * Returns          void
  *
  ******************************************************************************/
-void bnep_sec_check_complete(UNUSED_ATTR BD_ADDR bd_addr,
+void bnep_sec_check_complete(UNUSED_ATTR const RawAddress* bd_addr,
                              UNUSED_ATTR tBT_TRANSPORT trasnport,
                              void* p_ref_data, uint8_t result) {
   tBNEP_CONN* p_bcb = (tBNEP_CONN*)p_ref_data;
@@ -1119,10 +1164,8 @@ void bnep_sec_check_complete(UNUSED_ATTR BD_ADDR bd_addr,
                                      BNEP_SECURITY_FAIL, is_role_change);
 
         p_bcb->con_state = BNEP_STATE_CONNECTED;
-        memcpy((uint8_t*)&(p_bcb->src_uuid), (uint8_t*)&(p_bcb->prv_src_uuid),
-               sizeof(tBT_UUID));
-        memcpy((uint8_t*)&(p_bcb->dst_uuid), (uint8_t*)&(p_bcb->prv_dst_uuid),
-               sizeof(tBT_UUID));
+        p_bcb->src_uuid = p_bcb->prv_src_uuid;
+        p_bcb->dst_uuid = p_bcb->prv_dst_uuid;
         return;
       }
 
@@ -1142,8 +1185,8 @@ void bnep_sec_check_complete(UNUSED_ATTR BD_ADDR bd_addr,
     p_bcb->con_state = BNEP_STATE_CONN_SETUP;
 
     bnep_send_conn_req(p_bcb);
-    alarm_set_on_queue(p_bcb->conn_timer, BNEP_CONN_TIMEOUT_MS,
-                       bnep_conn_timer_timeout, p_bcb, btu_general_alarm_queue);
+    alarm_set_on_mloop(p_bcb->conn_timer, BNEP_CONN_TIMEOUT_MS,
+                       bnep_conn_timer_timeout, p_bcb);
     return;
   }
 
@@ -1155,10 +1198,8 @@ void bnep_sec_check_complete(UNUSED_ATTR BD_ADDR bd_addr,
        * state */
       p_bcb->con_state = BNEP_STATE_CONNECTED;
       p_bcb->con_flags &= (~BNEP_FLAGS_SETUP_RCVD);
-      memcpy((uint8_t*)&(p_bcb->src_uuid), (uint8_t*)&(p_bcb->prv_src_uuid),
-             sizeof(tBT_UUID));
-      memcpy((uint8_t*)&(p_bcb->dst_uuid), (uint8_t*)&(p_bcb->prv_dst_uuid),
-             sizeof(tBT_UUID));
+      p_bcb->src_uuid = p_bcb->prv_src_uuid;
+      p_bcb->dst_uuid = p_bcb->prv_dst_uuid;
       return;
     }
 
@@ -1170,8 +1211,8 @@ void bnep_sec_check_complete(UNUSED_ATTR BD_ADDR bd_addr,
 
   if (bnep_cb.p_conn_ind_cb) {
     p_bcb->con_state = BNEP_STATE_CONN_SETUP;
-    (*bnep_cb.p_conn_ind_cb)(p_bcb->handle, p_bcb->rem_bda, &p_bcb->dst_uuid,
-                             &p_bcb->src_uuid, is_role_change);
+    (*bnep_cb.p_conn_ind_cb)(p_bcb->handle, p_bcb->rem_bda, p_bcb->dst_uuid,
+                             p_bcb->src_uuid, is_role_change);
   } else {
     /* Profile didn't register connection indication call back */
     bnep_send_conn_responce(p_bcb, resp_code);
@@ -1192,7 +1233,8 @@ void bnep_sec_check_complete(UNUSED_ATTR BD_ADDR bd_addr,
  *                  BNEP_IGNORE_CMD       - if the protocol is filtered out
  *
  ******************************************************************************/
-tBNEP_RESULT bnep_is_packet_allowed(tBNEP_CONN* p_bcb, BD_ADDR p_dest_addr,
+tBNEP_RESULT bnep_is_packet_allowed(tBNEP_CONN* p_bcb,
+                                    const RawAddress& p_dest_addr,
                                     uint16_t protocol, bool fw_ext_present,
                                     uint8_t* p_data) {
   if (p_bcb->rcvd_num_filters) {
@@ -1228,17 +1270,17 @@ tBNEP_RESULT bnep_is_packet_allowed(tBNEP_CONN* p_bcb, BD_ADDR p_dest_addr,
   }
 
   /* Ckeck for multicast address filtering */
-  if ((p_dest_addr[0] & 0x01) && p_bcb->rcvd_mcast_filters) {
+  if ((p_dest_addr.address[0] & 0x01) && p_bcb->rcvd_mcast_filters) {
     uint16_t i;
 
     /* Check if every multicast should be filtered */
     if (p_bcb->rcvd_mcast_filters != 0xFFFF) {
       /* Check if the address is mentioned in the filter range */
       for (i = 0; i < p_bcb->rcvd_mcast_filters; i++) {
-        if ((memcmp(p_bcb->rcvd_mcast_filter_start[i], p_dest_addr,
-                    BD_ADDR_LEN) <= 0) &&
-            (memcmp(p_bcb->rcvd_mcast_filter_end[i], p_dest_addr,
-                    BD_ADDR_LEN) >= 0))
+        if ((memcmp(p_bcb->rcvd_mcast_filter_start[i].address,
+                    p_dest_addr.address, BD_ADDR_LEN) <= 0) &&
+            (memcmp(p_bcb->rcvd_mcast_filter_end[i].address,
+                    p_dest_addr.address, BD_ADDR_LEN) >= 0))
           break;
       }
     }
@@ -1250,36 +1292,11 @@ tBNEP_RESULT bnep_is_packet_allowed(tBNEP_CONN* p_bcb, BD_ADDR p_dest_addr,
     */
     if ((p_bcb->rcvd_mcast_filters == 0xFFFF) ||
         (i == p_bcb->rcvd_mcast_filters)) {
-      BNEP_TRACE_DEBUG(
-          "Ignoring multicast address %x.%x.%x.%x.%x.%x in BNEP data write",
-          p_dest_addr[0], p_dest_addr[1], p_dest_addr[2], p_dest_addr[3],
-          p_dest_addr[4], p_dest_addr[5]);
+      VLOG(1) << "Ignoring multicast address " << p_dest_addr
+              << " in BNEP data write";
       return BNEP_IGNORE_CMD;
     }
   }
 
   return BNEP_SUCCESS;
-}
-
-/*******************************************************************************
- *
- * Function         bnep_get_uuid32
- *
- * Description      This function returns the 32-bit equivalent of the UUID
- *
- * Returns          uint32_t - 32-bit equivalent of the UUID
- *
- ******************************************************************************/
-uint32_t bnep_get_uuid32(tBT_UUID* src_uuid) {
-  uint32_t result;
-
-  if (src_uuid->len == 2)
-    return ((uint32_t)src_uuid->uu.uuid16);
-  else if (src_uuid->len == 4)
-    return (src_uuid->uu.uuid32 & 0x0000FFFF);
-  else {
-    result = src_uuid->uu.uuid128[2];
-    result = (result << 8) | (src_uuid->uu.uuid128[3]);
-    return result;
-  }
 }

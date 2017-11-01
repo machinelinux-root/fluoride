@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- *  Copyright (C) 2015 Google, Inc.
+ *  Copyright 2015 Google, Inc.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -33,6 +33,7 @@
 #include <mutex>
 #include <string>
 
+#include "base/logging.h"
 #include "osi/include/alarm.h"
 #include "osi/include/allocator.h"
 #include "osi/include/log.h"
@@ -198,6 +199,7 @@ static void wakelock_initialize_native(void) {
   if (wake_lock_fd == INVALID_FD) {
     LOG_ERROR(LOG_TAG, "%s can't open wake lock %s: %s", __func__,
               wake_lock_path.c_str(), strerror(errno));
+    CHECK(wake_lock_fd != INVALID_FD);
   }
 
   if (wake_unlock_path.empty()) wake_unlock_path = DEFAULT_WAKE_UNLOCK_PATH;
@@ -206,6 +208,7 @@ static void wakelock_initialize_native(void) {
   if (wake_unlock_fd == INVALID_FD) {
     LOG_ERROR(LOG_TAG, "%s can't open wake unlock %s: %s", __func__,
               wake_unlock_path.c_str(), strerror(errno));
+    CHECK(wake_unlock_fd != INVALID_FD);
   }
 }
 
@@ -278,7 +281,7 @@ static void update_wakelock_acquired_stats(bt_status_t acquired_status) {
   wakelock_stats.last_acquired_timestamp_ms = now_ms;
 
   BluetoothMetricsLogger::GetInstance()->LogWakeEvent(
-      system_bt_osi::WAKE_EVENT_ACQUIRED, "", WAKE_LOCK_ID, now_ms);
+      system_bt_osi::WAKE_EVENT_ACQUIRED, "", "", now_ms);
 }
 
 //
@@ -320,7 +323,7 @@ static void update_wakelock_released_stats(bt_status_t released_status) {
   wakelock_stats.total_acquired_interval_ms += delta_ms;
 
   BluetoothMetricsLogger::GetInstance()->LogWakeEvent(
-      system_bt_osi::WAKE_EVENT_RELEASED, "", WAKE_LOCK_ID, now_ms);
+      system_bt_osi::WAKE_EVENT_RELEASED, "", "", now_ms);
 }
 
 void wakelock_debug_dump(int fd) {

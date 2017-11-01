@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- *  Copyright (C) 2004-2012 Broadcom Corporation
+ *  Copyright 2004-2012 Broadcom Corporation
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -37,8 +37,6 @@
 #include "l2c_api.h"
 #include "l2c_int.h"
 #include "l2cdefs.h"
-
-extern fixed_queue_t* btu_general_alarm_queue;
 
 /* Flag passed to retransmit_i_frames() when all packets should be retransmitted
  */
@@ -180,8 +178,8 @@ void l2c_fcr_start_timer(tL2C_CCB* p_ccb) {
 
   /* Only start a timer that was not started */
   if (!alarm_is_scheduled(p_ccb->fcrb.mon_retrans_timer)) {
-    alarm_set_on_queue(p_ccb->fcrb.mon_retrans_timer, tout,
-                       l2c_ccb_timer_timeout, p_ccb, btu_general_alarm_queue);
+    alarm_set_on_mloop(p_ccb->fcrb.mon_retrans_timer, tout,
+                       l2c_ccb_timer_timeout, p_ccb);
   }
 }
 
@@ -377,7 +375,7 @@ bool l2c_fcr_is_flow_controlled(tL2C_CCB* p_ccb) {
   CHECK(p_ccb != NULL);
   if (p_ccb->peer_cfg.fcr.mode == L2CAP_FCR_ERTM_MODE) {
     /* Check if remote side flowed us off or the transmit window is full */
-    if ((p_ccb->fcrb.remote_busy == true) ||
+    if ((p_ccb->fcrb.remote_busy) ||
         (fixed_queue_length(p_ccb->fcrb.waiting_for_ack_q) >=
          p_ccb->peer_cfg.fcr.tx_win_sz)) {
 #if (L2CAP_ERTM_STATS == TRUE)
@@ -712,9 +710,8 @@ void l2c_fcr_proc_pdu(tL2C_CCB* p_ccb, BT_HDR* p_buf) {
          * final,  */
         /* then it speeds up recovery significantly if we poll him back soon
          * after his poll. */
-        alarm_set_on_queue(p_ccb->fcrb.mon_retrans_timer, BT_1SEC_TIMEOUT_MS,
-                           l2c_ccb_timer_timeout, p_ccb,
-                           btu_general_alarm_queue);
+        alarm_set_on_mloop(p_ccb->fcrb.mon_retrans_timer, BT_1SEC_TIMEOUT_MS,
+                           l2c_ccb_timer_timeout, p_ccb);
       }
       osi_free(p_buf);
       return;
@@ -805,8 +802,7 @@ void l2c_fcr_proc_pdu(tL2C_CCB* p_ccb, BT_HDR* p_buf) {
   /* If a window has opened, check if we can send any more packets */
   if ((!fixed_queue_is_empty(p_ccb->fcrb.retrans_q) ||
        !fixed_queue_is_empty(p_ccb->xmit_hold_q)) &&
-      (p_ccb->fcrb.wait_ack == false) &&
-      (l2c_fcr_is_flow_controlled(p_ccb) == false)) {
+      (!p_ccb->fcrb.wait_ack) && (!l2c_fcr_is_flow_controlled(p_ccb))) {
     l2c_link_check_send_pkts(p_ccb->p_lcb, NULL, NULL);
   }
 }
@@ -1301,9 +1297,8 @@ static void process_i_frame(tL2C_CCB* p_ccb, BT_HDR* p_buf, uint16_t ctrl_word,
     if (delay_ack) {
       /* If it is the first I frame we did not ack, start ack timer */
       if (!alarm_is_scheduled(p_ccb->fcrb.ack_timer)) {
-        alarm_set_on_queue(p_ccb->fcrb.ack_timer, L2CAP_FCR_ACK_TIMEOUT_MS,
-                           l2c_fcrb_ack_timer_timeout, p_ccb,
-                           btu_general_alarm_queue);
+        alarm_set_on_mloop(p_ccb->fcrb.ack_timer, L2CAP_FCR_ACK_TIMEOUT_MS,
+                           l2c_fcrb_ack_timer_timeout, p_ccb);
       }
     } else if ((fixed_queue_is_empty(p_ccb->xmit_hold_q) ||
                 l2c_fcr_is_flow_controlled(p_ccb)) &&
@@ -1493,7 +1488,7 @@ static bool do_sar_reassembly(tL2C_CCB* p_ccb, BT_HDR* p_buf,
     }
   }
 
-  if (packet_ok == false) {
+  if (!packet_ok) {
     osi_free(p_buf);
   } else if (p_buf != NULL) {
 #if (L2CAP_NUM_FIXED_CHNLS > 0)
@@ -1835,7 +1830,7 @@ BT_HDR* l2c_lcc_get_next_xmit_sdu_seg(tL2C_CCB* p_ccb,
   }
 
   /* Get a new buffer and copy the data that can be sent in a PDU */
-  if (first_seg == true)
+  if (first_seg)
     p_xmit = l2c_fcr_clone_buf(p_buf, L2CAP_LCC_OFFSET, no_of_bytes_to_send);
   else
     p_xmit = l2c_fcr_clone_buf(p_buf, L2CAP_MIN_OFFSET, no_of_bytes_to_send);
@@ -1844,7 +1839,7 @@ BT_HDR* l2c_lcc_get_next_xmit_sdu_seg(tL2C_CCB* p_ccb,
     p_buf->event = p_ccb->local_cid;
     p_xmit->event = p_ccb->local_cid;
 
-    if (first_seg == true) {
+    if (first_seg) {
       p_xmit->offset -= L2CAP_LCC_SDU_LENGTH; /* for writing the SDU length. */
       p = (uint8_t*)(p_xmit + 1) + p_xmit->offset;
       UINT16_TO_STREAM(p, sdu_len);
@@ -1864,7 +1859,7 @@ BT_HDR* l2c_lcc_get_next_xmit_sdu_seg(tL2C_CCB* p_ccb,
     return (NULL);
   }
 
-  if (last_seg == true) {
+  if (last_seg) {
     p_buf = (BT_HDR*)fixed_queue_try_dequeue(p_ccb->xmit_hold_q);
     osi_free(p_buf);
   }
@@ -2198,9 +2193,8 @@ bool l2c_fcr_renegotiate_chan(tL2C_CCB* p_ccb, tL2CAP_CFG_INFO* p_cfg) {
 
         l2cu_process_our_cfg_req(p_ccb, &p_ccb->our_cfg);
         l2cu_send_peer_config_req(p_ccb, &p_ccb->our_cfg);
-        alarm_set_on_queue(p_ccb->l2c_ccb_timer, L2CAP_CHNL_CFG_TIMEOUT_MS,
-                           l2c_ccb_timer_timeout, p_ccb,
-                           btu_general_alarm_queue);
+        alarm_set_on_mloop(p_ccb->l2c_ccb_timer, L2CAP_CHNL_CFG_TIMEOUT_MS,
+                           l2c_ccb_timer_timeout, p_ccb);
         return (true);
       }
     }

@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- *  Copyright (C) 2003-2012 Broadcom Corporation
+ *  Copyright 2003-2012 Broadcom Corporation
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -60,8 +60,8 @@ bool bta_av_co_audio_init(btav_a2dp_codec_index_t codec_index,
  *
  ******************************************************************************/
 void bta_av_co_audio_disc_res(tBTA_AV_HNDL hndl, uint8_t num_seps,
-                              uint8_t num_snk, uint8_t num_src, BD_ADDR addr,
-                              uint16_t uuid_local);
+                              uint8_t num_snk, uint8_t num_src,
+                              const RawAddress& addr, uint16_t uuid_local);
 
 /*******************************************************************************
  *
@@ -93,7 +93,8 @@ tA2DP_STATUS bta_av_co_audio_getconfig(tBTA_AV_HNDL hndl, uint8_t* p_codec_info,
  *
  ******************************************************************************/
 void bta_av_co_audio_setconfig(tBTA_AV_HNDL hndl, const uint8_t* p_codec_info,
-                               uint8_t seid, BD_ADDR addr, uint8_t num_protect,
+                               uint8_t seid, const RawAddress& addr,
+                               uint8_t num_protect,
                                const uint8_t* p_protect_info,
                                uint8_t t_local_sep, uint8_t avdt_handle);
 
@@ -196,5 +197,20 @@ void bta_av_co_audio_drop(tBTA_AV_HNDL hndl);
  *
  ******************************************************************************/
 void bta_av_co_audio_delay(tBTA_AV_HNDL hndl, uint16_t delay);
+
+/*******************************************************************************
+ *
+ * Function         bta_av_co_audio_update_mtu
+ *
+ * Description      This function is called by AV when the audio stream
+ *                  connection MTU needs to be updated.
+ *                  BTA-AV maintains the MTU of A2DP streams.
+ *                  If this is the 2nd audio stream, mtu is the smaller of the 2
+ *                  streams.
+ *
+ * Returns          void
+ *
+ ******************************************************************************/
+void bta_av_co_audio_update_mtu(tBTA_AV_HNDL hndl, uint16_t mtu);
 
 #endif /* BTA_AV_CO_H */

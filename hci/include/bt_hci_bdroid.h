@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- *  Copyright (C) 2009-2012 Broadcom Corporation
+ *  Copyright 2009-2012 Broadcom Corporation
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -38,6 +38,7 @@
  *****************************************************************************/
 
 #include <stdbool.h>
+#include <stdint.h>
 
 #define HCI_ACL_MAX_SIZE 1024
 #define HCI_MAX_FRAME_SIZE (HCI_ACL_MAX_SIZE + 4)
@@ -79,16 +80,6 @@ typedef struct {
 } HC_BT_HDR;
 
 #define BT_HC_HDR_SIZE (sizeof(HC_BT_HDR))
-
-typedef struct _hc_buffer_hdr {
-  struct _hc_buffer_hdr* p_next; /* next buffer in the queue */
-  uint8_t reserved1;
-  uint8_t reserved2;
-  uint8_t reserved3;
-  uint8_t reserved4;
-} HC_BUFFER_HDR_T;
-
-#define BT_HC_BUFFER_HDR_SIZE (sizeof(HC_BUFFER_HDR_T))
 
 /******************************************************************************
  *  Extern variables and functions

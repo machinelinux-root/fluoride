@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016 The Android Open Source Project
+ * Copyright 2016 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,30 +27,35 @@
 
 class A2dpCodecConfigSbc : public A2dpCodecConfig {
  public:
-  A2dpCodecConfigSbc();
+  A2dpCodecConfigSbc(btav_a2dp_codec_priority_t codec_priority);
   virtual ~A2dpCodecConfigSbc();
 
   bool init() override;
+  period_ms_t encoderIntervalMs() const override;
   bool setCodecConfig(const uint8_t* p_peer_codec_info, bool is_capability,
                       uint8_t* p_result_codec_config) override;
 
  private:
+  bool useRtpHeaderMarkerBit() const override;
   bool updateEncoderUserConfig(
       const tA2DP_ENCODER_INIT_PEER_PARAMS* p_peer_params,
       bool* p_restart_input, bool* p_restart_output,
       bool* p_config_updated) override;
+  void debug_codec_dump(int fd) override;
 };
 
 class A2dpCodecConfigSbcSink : public A2dpCodecConfig {
  public:
-  A2dpCodecConfigSbcSink();
+  A2dpCodecConfigSbcSink(btav_a2dp_codec_priority_t codec_priority);
   virtual ~A2dpCodecConfigSbcSink();
 
   bool init() override;
+  period_ms_t encoderIntervalMs() const override;
   bool setCodecConfig(const uint8_t* p_peer_codec_info, bool is_capability,
                       uint8_t* p_result_codec_config) override;
 
  private:
+  bool useRtpHeaderMarkerBit() const override;
   bool updateEncoderUserConfig(
       const tA2DP_ENCODER_INIT_PEER_PARAMS* p_peer_params,
       bool* p_restart_input, bool* p_restart_output,
@@ -131,12 +136,6 @@ bool A2DP_CodecEqualsSbc(const uint8_t* p_codec_info_a,
 // contains invalid codec information.
 int A2DP_GetTrackSampleRateSbc(const uint8_t* p_codec_info);
 
-// Gets the bits per audio sample for the A2DP SBC codec.
-// |p_codec_info| is a pointer to the SBC codec_info to decode.
-// Returns the bits per audio sample on success, or -1 if |p_codec_info|
-// contains invalid codec information.
-int A2DP_GetTrackBitsPerSampleSbc(const uint8_t* p_codec_info);
-
 // Gets the channel count for the A2DP SBC codec.
 // |p_codec_info| is a pointer to the SBC codec_info to decode.
 // Returns the channel count on success, or -1 if |p_codec_info|
@@ -156,35 +155,35 @@ int A2DP_GetNumberOfSubbandsSbc(const uint8_t* p_codec_info);
 int A2DP_GetNumberOfBlocksSbc(const uint8_t* p_codec_info);
 
 // Gets the allocation method code for the A2DP SBC codec.
-// The actual value is codec-specific.
+// The actual value is codec-specific - see |A2DP_SBC_IE_ALLOC_MD_*|.
 // |p_codec_info| is a pointer to the SBC codec_info to decode.
 // Returns the allocation method code on success, or -1 if |p_codec_info|
 // contains invalid codec information.
 int A2DP_GetAllocationMethodCodeSbc(const uint8_t* p_codec_info);
 
 // Gets the channel mode code for the A2DP SBC codec.
-// The actual value is codec-specific.
+// The actual value is codec-specific - see |A2DP_SBC_IE_CH_MD_*|.
 // |p_codec_info| is a pointer to the SBC codec_info to decode.
 // Returns the channel mode code on success, or -1 if |p_codec_info|
 // contains invalid codec information.
 int A2DP_GetChannelModeCodeSbc(const uint8_t* p_codec_info);
 
 // Gets the sampling frequency code for the A2DP SBC codec.
-// The actual value is codec-specific.
+// The actual value is codec-specific - see |A2DP_SBC_IE_SAMP_FREQ_*|.
 // |p_codec_info| is a pointer to the SBC codec_info to decode.
 // Returns the sampling frequency code on success, or -1 if |p_codec_info|
 // contains invalid codec information.
 int A2DP_GetSamplingFrequencyCodeSbc(const uint8_t* p_codec_info);
 
 // Gets the minimum bitpool for the A2DP SBC codec.
-// The actual value is codec-specific.
+// The actual value is codec-specific - see |A2DP_SBC_IE_MIN_BITPOOL|.
 // |p_codec_info| is a pointer to the SBC codec_info to decode.
 // Returns the minimum bitpool on success, or -1 if |p_codec_info|
 // contains invalid codec information.
 int A2DP_GetMinBitpoolSbc(const uint8_t* p_codec_info);
 
 // Gets the maximum bitpool for the A2DP SBC codec.
-// The actual value is codec-specific.
+// The actual value is codec-specific - see |A2DP_SBC_IE_MAX_BITPOOL|.
 // |p_codec_info| is a pointer to the SBC codec_info to decode.
 // Returns the maximum bitpool on success, or -1 if |p_codec_info|
 // contains invalid codec information.
@@ -196,14 +195,6 @@ int A2DP_GetMaxBitpoolSbc(const uint8_t* p_codec_info);
 // Returns the channel type on success, or -1 if |p_codec_info|
 // contains invalid codec information.
 int A2DP_GetSinkTrackChannelTypeSbc(const uint8_t* p_codec_info);
-
-// Computes the number of frames to process in a time window for the A2DP
-// SBC sink codec. |time_interval_ms| is the time interval (in milliseconds).
-// |p_codec_info| is a pointer to the codec_info to decode.
-// Returns the number of frames to process on success, or -1 if |p_codec_info|
-// contains invalid codec information.
-int A2DP_GetSinkFramesCountToProcessSbc(uint64_t time_interval_ms,
-                                        const uint8_t* p_codec_info);
 
 // Gets the A2DP SBC audio data timestamp from an audio packet.
 // |p_codec_info| contains the codec information.
@@ -221,9 +212,10 @@ bool A2DP_GetPacketTimestampSbc(const uint8_t* p_codec_info,
 bool A2DP_BuildCodecHeaderSbc(const uint8_t* p_codec_info, BT_HDR* p_buf,
                               uint16_t frames_per_packet);
 
-// Decodes and displays SBC codec info (for debugging).
+// Decodes and displays A2DP SBC codec info when using |LOG_DEBUG|.
 // |p_codec_info| is a pointer to the SBC codec_info to decode and display.
-void A2DP_DumpCodecInfoSbc(const uint8_t* p_codec_info);
+// Returns true if the codec information is valid, otherwise false.
+bool A2DP_DumpCodecInfoSbc(const uint8_t* p_codec_info);
 
 // Gets the A2DP SBC encoder interface that can be used to encode and prepare
 // A2DP packets for transmission - see |tA2DP_ENCODER_INTERFACE|.
@@ -231,6 +223,14 @@ void A2DP_DumpCodecInfoSbc(const uint8_t* p_codec_info);
 // Returns the A2DP SBC encoder interface if the |p_codec_info| is valid and
 // supported, otherwise NULL.
 const tA2DP_ENCODER_INTERFACE* A2DP_GetEncoderInterfaceSbc(
+    const uint8_t* p_codec_info);
+
+// Gets the A2DP SBC decoder interface that can be used to decode received A2DP
+// packets - see |tA2DP_DECODER_INTERFACE|.
+// |p_codec_info| contains the codec information.
+// Returns the A2DP SBC decoder interface if the |p_codec_info| is valid and
+// supported, otherwise NULL.
+const tA2DP_DECODER_INTERFACE* A2DP_GetDecoderInterfaceSbc(
     const uint8_t* p_codec_info);
 
 // Adjusts the A2DP SBC codec, based on local support and Bluetooth

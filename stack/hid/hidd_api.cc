@@ -1,7 +1,7 @@
 /******************************************************************************
  *
- *  Copyright (C) 2016 The Android Open Source Project
- *  Copyright (C) 2002-2012 Broadcom Corporation
+ *  Copyright 2016 The Android Open Source Project
+ *  Copyright 2002-2012 Broadcom Corporation
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -34,9 +34,7 @@
 #include "hidd_int.h"
 #include "hiddefs.h"
 
-#if HID_DYNAMIC_MEMORY == FALSE
 tHID_DEV_CTB hd_cb;
-#endif
 
 /*******************************************************************************
  *
@@ -92,9 +90,8 @@ tHID_STATUS HID_DevRegister(tHID_DEV_HOST_CALLBACK* host_cback) {
   if (host_cback == NULL) return HID_ERR_INVALID_PARAM;
 
   /* Register with L2CAP */
-  if ((st = hidd_conn_reg()) != HID_SUCCESS) {
-    return st;
-  }
+  st = hidd_conn_reg();
+  if (st != HID_SUCCESS) return st;
 
   hd_cb.callback = host_cback;
   hd_cb.reg_flag = TRUE;
@@ -425,9 +422,9 @@ tHID_STATUS HID_DevVirtualCableUnplug(void) {
  * Returns          tHID_STATUS
  *
  ******************************************************************************/
-tHID_STATUS HID_DevPlugDevice(BD_ADDR addr) {
+tHID_STATUS HID_DevPlugDevice(const RawAddress& addr) {
   hd_cb.device.in_use = TRUE;
-  memcpy(hd_cb.device.addr, addr, sizeof(BD_ADDR));
+  hd_cb.device.addr = addr;
 
   return HID_SUCCESS;
 }
@@ -441,8 +438,8 @@ tHID_STATUS HID_DevPlugDevice(BD_ADDR addr) {
  * Returns          tHID_STATUS
  *
  ******************************************************************************/
-tHID_STATUS HID_DevUnplugDevice(BD_ADDR addr) {
-  if (!memcmp(hd_cb.device.addr, addr, sizeof(BD_ADDR))) {
+tHID_STATUS HID_DevUnplugDevice(const RawAddress& addr) {
+  if (hd_cb.device.addr == addr) {
     hd_cb.device.in_use = FALSE;
     hd_cb.device.conn.conn_state = HID_CONN_STATE_UNUSED;
     hd_cb.device.conn.ctrl_cid = 0;
@@ -496,6 +493,14 @@ tHID_STATUS HID_DevDisconnect(void) {
   }
 
   if (hd_cb.device.state == HIDD_DEV_NO_CONN) {
+    /* If we are still trying to connect, just close the connection. */
+    if (hd_cb.device.conn.conn_state != HID_CONN_STATE_UNUSED) {
+      tHID_STATUS ret = hidd_conn_disconnect();
+      hd_cb.device.conn.conn_state = HID_CONN_STATE_UNUSED;
+      hd_cb.callback(hd_cb.device.addr, HID_DHOST_EVT_CLOSE,
+                     HID_ERR_DISCONNECTING, NULL);
+      return ret;
+    }
     return HID_ERR_NO_CONNECTION;
   }
 
@@ -559,11 +564,11 @@ tHID_STATUS HID_DevReportError(uint8_t error) {
  * Returns          tHID_STATUS
  *
  ******************************************************************************/
-tHID_STATUS HID_DevGetDevice(BD_ADDR* addr) {
+tHID_STATUS HID_DevGetDevice(RawAddress* addr) {
   HIDD_TRACE_API("%s", __func__);
 
   if (hd_cb.device.in_use) {
-    memcpy(addr, hd_cb.device.addr, sizeof(BD_ADDR));
+    *addr = hd_cb.device.addr;
   } else {
     return HID_ERR_NOT_REGISTERED;
   }

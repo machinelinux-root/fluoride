@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016 The Android Open Source Project
+ * Copyright 2016 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,18 +27,21 @@
 
 class A2dpCodecConfigLdac : public A2dpCodecConfig {
  public:
-  A2dpCodecConfigLdac();
+  A2dpCodecConfigLdac(btav_a2dp_codec_priority_t codec_priority);
   virtual ~A2dpCodecConfigLdac();
 
   bool init() override;
+  period_ms_t encoderIntervalMs() const override;
   bool setCodecConfig(const uint8_t* p_peer_codec_info, bool is_capability,
                       uint8_t* p_result_codec_config) override;
 
  private:
+  bool useRtpHeaderMarkerBit() const override;
   bool updateEncoderUserConfig(
       const tA2DP_ENCODER_INIT_PEER_PARAMS* p_peer_params,
       bool* p_restart_input, bool* p_restart_output,
       bool* p_config_updated) override;
+  void debug_codec_dump(int fd) override;
 };
 
 // Checks whether the codec capabilities contain a valid A2DP LDAC Source
@@ -85,12 +88,6 @@ bool A2DP_VendorCodecEqualsLdac(const uint8_t* p_codec_info_a,
 // contains invalid codec information.
 int A2DP_VendorGetTrackSampleRateLdac(const uint8_t* p_codec_info);
 
-// Gets the bits per audio sample for the A2DP LDAC codec.
-// |p_codec_info| is a pointer to the LDAC codec_info to decode.
-// Returns the bits per audio sample on success, or -1 if |p_codec_info|
-// contains invalid codec information.
-int A2DP_VendorGetTrackBitsPerSampleLdac(const uint8_t* p_codec_info);
-
 // Gets the channel count for the A2DP LDAC codec.
 // |p_codec_info| is a pointer to the LDAC codec_info to decode.
 // Returns the channel count on success, or -1 if |p_codec_info|
@@ -98,7 +95,7 @@ int A2DP_VendorGetTrackBitsPerSampleLdac(const uint8_t* p_codec_info);
 int A2DP_VendorGetTrackChannelCountLdac(const uint8_t* p_codec_info);
 
 // Gets the channel mode code for the A2DP LDAC codec.
-// The actual value is codec-specific.
+// The actual value is codec-specific - see |A2DP_LDAC_CHANNEL_MODE_*|.
 // |p_codec_info| is a pointer to the LDAC codec_info to decode.
 // Returns the channel mode code on success, or -1 if |p_codec_info|
 // contains invalid codec information.
@@ -121,9 +118,10 @@ bool A2DP_VendorGetPacketTimestampLdac(const uint8_t* p_codec_info,
 bool A2DP_VendorBuildCodecHeaderLdac(const uint8_t* p_codec_info, BT_HDR* p_buf,
                                      uint16_t frames_per_packet);
 
-// Decodes and displays LDAC codec info (for debugging).
+// Decodes and displays A2DP LDAC codec info when using |LOG_DEBUG|.
 // |p_codec_info| is a pointer to the LDAC codec_info to decode and display.
-void A2DP_VendorDumpCodecInfoLdac(const uint8_t* p_codec_info);
+// Returns true if the codec information is valid, otherwise false.
+bool A2DP_VendorDumpCodecInfoLdac(const uint8_t* p_codec_info);
 
 // Gets the A2DP LDAC encoder interface that can be used to encode and prepare
 // A2DP packets for transmission - see |tA2DP_ENCODER_INTERFACE|.

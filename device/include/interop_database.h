@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- *  Copyright (C) 2015 Google, Inc.
+ *  Copyright 2015 Google, Inc.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -19,9 +19,10 @@
 #pragma once
 
 #include "device/include/interop.h"
+#include "raw_address.h"
 
 typedef struct {
-  bt_bdaddr_t addr;
+  RawAddress addr;
   size_t length;
   interop_feature_t feature;
 } interop_addr_entry_t;
@@ -42,6 +43,13 @@ static const interop_addr_entry_t interop_addr_database[] = {
     {{{0xac, 0x9e, 0x17, 0, 0, 0}}, 3, INTEROP_DISABLE_LE_SECURE_CONNECTIONS},
     {{{0xf0, 0x79, 0x59, 0, 0, 0}}, 3, INTEROP_DISABLE_LE_SECURE_CONNECTIONS},
 
+    {{{0x08, 0x62, 0x66, 0, 0, 0}}, 3, INTEROP_HID_PREF_CONN_SUP_TIMEOUT_3S},
+    {{{0x38, 0x2c, 0x4a, 0xc9, 0, 0}}, 4, INTEROP_HID_PREF_CONN_SUP_TIMEOUT_3S},
+    {{{0x38, 0x2c, 0x4a, 0xe6, 0, 0}}, 4, INTEROP_HID_PREF_CONN_SUP_TIMEOUT_3S},
+    {{{0x54, 0xa0, 0x50, 0xd9, 0, 0}}, 4, INTEROP_HID_PREF_CONN_SUP_TIMEOUT_3S},
+    {{{0xac, 0x9e, 0x17, 0, 0, 0}}, 3, INTEROP_HID_PREF_CONN_SUP_TIMEOUT_3S},
+    {{{0xf0, 0x79, 0x59, 0, 0, 0}}, 3, INTEROP_HID_PREF_CONN_SUP_TIMEOUT_3S},
+
     // Ausdom M05 - unacceptably loud volume
     {{{0xa0, 0xe9, 0xdb, 0, 0, 0}}, 3, INTEROP_DISABLE_ABSOLUTE_VOLUME},
 
@@ -60,8 +68,18 @@ static const interop_addr_entry_t interop_addr_database[] = {
     {{{0x44, 0x5e, 0xf3, 0, 0, 0}}, 3, INTEROP_DISABLE_ABSOLUTE_VOLUME},
     {{{0xd4, 0x9c, 0x28, 0, 0, 0}}, 3, INTEROP_DISABLE_ABSOLUTE_VOLUME},
 
+    // Bose QuiteComfort 35, SoundSport and similar (because of older firmware)
+    {{{0x04, 0x52, 0xc7, 0, 0, 0}}, 3, INTEROP_2MBPS_LINK_ONLY},
+
     // JayBird Family
     {{{0x00, 0x18, 0x91, 0, 0, 0}}, 3, INTEROP_2MBPS_LINK_ONLY},
+
+    // Sony MBH-10
+    {{{0x20, 0x15, 0x06, 0, 0, 0}}, 3, INTEROP_2MBPS_LINK_ONLY},
+
+    // Uconnect
+    {{{0x00, 0x54, 0xaf, 0, 0, 0}}, 3, INTEROP_2MBPS_LINK_ONLY},
+    {{{0x30, 0x14, 0x4a, 0, 0, 0}}, 3, INTEROP_2MBPS_LINK_ONLY},
 
     // LG Tone HBS-730 - unacceptably loud volume
     {{{0x00, 0x18, 0x6b, 0, 0, 0}}, 3, INTEROP_DISABLE_ABSOLUTE_VOLUME},
@@ -98,6 +116,27 @@ static const interop_addr_entry_t interop_addr_database[] = {
 
     // Unknown keyboard (carried over from auto_pair_devlist.conf)
     {{{0x00, 0x0F, 0xF6, 0, 0, 0}}, 3, INTEROP_KEYBOARD_REQUIRES_FIXED_PIN},
+
+    // Kenwood KMM-BT518HD - no audio when A2DP codec sample rate is changed
+    {{{0x00, 0x1d, 0x86, 0, 0, 0}}, 3, INTEROP_DISABLE_AVDTP_RECONFIGURE},
+
+    // NAC FORD-2013 - Lincoln
+    {{{0x00, 0x26, 0xb4, 0, 0, 0}}, 3, INTEROP_DISABLE_ROLE_SWITCH},
+
+    // Toyota Prius - 2015
+    {{{0xfc, 0xc2, 0xde, 0, 0, 0}}, 3, INTEROP_DISABLE_ROLE_SWITCH},
+
+    // OBU II Bluetooth dongle
+    {{{0x00, 0x04, 0x3e, 0, 0, 0}}, 3, INTEROP_DISABLE_ROLE_SWITCH},
+
+    // Roman R9020
+    {{{0x00, 0x23, 0x01, 0, 0, 0}}, 3, INTEROP_DISABLE_ROLE_SWITCH},
+
+    // Jabra Storm
+    {{{0x1c, 0x48, 0xf9, 0, 0, 0}}, 3, INTEROP_DISABLE_ROLE_SWITCH},
+
+    // Jeep Uconnect
+    {{{0x00, 0x54, 0xaf, 0, 0, 0}}, 3, INTEROP_DISABLE_ROLE_SWITCH},
 };
 
 typedef struct {
@@ -118,4 +157,10 @@ static const interop_name_entry_t interop_name_database[] = {
 
     // Subaru car kits ("CAR M_MEDIA")
     {"CAR", 3, INTEROP_DISABLE_AUTO_PAIRING},
+
+    // Pixel C Keyboard doesn't respond to service changed indications.
+    {"Pixel C Keyboard", 16, INTEROP_GATTC_NO_SERVICE_CHANGED_IND},
+
+    // Kenwood KMM-BT518HD - no audio when A2DP codec sample rate is changed
+    {"KMM-BT51*HD", 11, INTEROP_DISABLE_AVDTP_RECONFIGURE},
 };

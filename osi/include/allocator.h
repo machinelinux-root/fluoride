@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- *  Copyright (C) 2014 Google, Inc.
+ *  Copyright 2014 Google, Inc.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -46,3 +46,8 @@ void osi_free(void* ptr);
 // |p_ptr| is a pointer to the buffer pointer to be reset.
 // |p_ptr| cannot be NULL.
 void osi_free_and_reset(void** p_ptr);
+
+// Dump allocation-related statistics and debug info to the |fd| file
+// descriptor.
+// The information is in user-readable text format. The |fd| must be valid.
+void osi_allocator_debug_dump(int fd);

@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- *  Copyright (C) 2000-2012 Broadcom Corporation
+ *  Copyright 2000-2012 Broadcom Corporation
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -36,30 +36,16 @@
 #include "sdpint.h"
 #include "smp_int.h"
 
-// Increase BTU task thread priority to avoid pre-emption
-// of audio realated tasks.
-#define BTU_TASK_THREAD_PRIORITY (-19)
-
-extern fixed_queue_t* btif_msg_queue;
-
-// Communication queue from bta thread to bt_workqueue.
-fixed_queue_t* btu_bta_msg_queue;
+// RT priority for audio-related tasks
+#define BTU_TASK_RT_PRIORITY 1
 
 // Communication queue from hci thread to bt_workqueue.
 extern fixed_queue_t* btu_hci_msg_queue;
-
-// General timer queue.
-fixed_queue_t* btu_general_alarm_queue;
 
 thread_t* bt_workqueue_thread;
 static const char* BT_WORKQUEUE_NAME = "bt_workqueue";
 
 extern void PLATFORM_DisableHciTransport(uint8_t bDisable);
-/*****************************************************************************
- *                          V A R I A B L E S                                *
- *****************************************************************************/
-// TODO(cmanton) Move this out of this file
-const BD_ADDR BT_BD_ANY = {0xff, 0xff, 0xff, 0xff, 0xff, 0xff};
 
 void btu_task_start_up(void* context);
 void btu_task_shut_down(void* context);
@@ -121,16 +107,10 @@ void btu_free_core(void) {
 void BTU_StartUp(void) {
   btu_trace_level = HCI_INITIAL_TRACE_LEVEL;
 
-  btu_bta_msg_queue = fixed_queue_new(SIZE_MAX);
-  if (btu_bta_msg_queue == NULL) goto error_exit;
-
-  btu_general_alarm_queue = fixed_queue_new(SIZE_MAX);
-  if (btu_general_alarm_queue == NULL) goto error_exit;
-
   bt_workqueue_thread = thread_new(BT_WORKQUEUE_NAME);
   if (bt_workqueue_thread == NULL) goto error_exit;
 
-  thread_set_priority(bt_workqueue_thread, BTU_TASK_THREAD_PRIORITY);
+  thread_set_rt_priority(bt_workqueue_thread, BTU_TASK_RT_PRIORITY);
 
   // Continue startup on bt workqueue thread.
   thread_post(bt_workqueue_thread, btu_task_start_up, NULL);
@@ -145,11 +125,6 @@ error_exit:;
 void BTU_ShutDown(void) {
   btu_task_shut_down(NULL);
 
-  fixed_queue_free(btu_bta_msg_queue, NULL);
-  btu_bta_msg_queue = NULL;
-
-  fixed_queue_free(btu_general_alarm_queue, NULL);
-  btu_general_alarm_queue = NULL;
 
   thread_free(bt_workqueue_thread);
 

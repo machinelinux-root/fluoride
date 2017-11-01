@@ -1,5 +1,5 @@
 //
-//  Copyright (C) 2015 Google, Inc.
+//  Copyright 2015 Google, Inc.
 //
 //  Licensed under the Apache License, Version 2.0 (the "License");
 //  you may not use this file except in compliance with the License.
@@ -66,7 +66,6 @@ bt_interface_t fake_bt_iface = {
     nullptr, /* dut_mode_configure */
     nullptr, /* dut_more_send */
     nullptr, /* le_test_mode */
-    nullptr, /* config_hci_snoop_log */
     nullptr, /* set_os_callouts */
     nullptr, /* read_energy_info */
     nullptr, /* dump */
@@ -114,10 +113,10 @@ void FakeBluetoothInterface::NotifyAdapterNamePropertyChanged(
 }
 
 void FakeBluetoothInterface::NotifyAdapterAddressPropertyChanged(
-    const bt_bdaddr_t* address) {
+    const RawAddress* address) {
   bt_property_t property;
-  property.len = sizeof(bt_bdaddr_t);
-  property.val = (void*)address;
+  property.len = RawAddress::kLength;
+  property.val = (void*)address->address;
   property.type = BT_PROPERTY_BDADDR;
 
   NotifyAdapterPropertiesChanged(1, &property);
@@ -134,8 +133,7 @@ void FakeBluetoothInterface::NotifyAdapterLocalLeFeaturesPropertyChanged(
 }
 
 void FakeBluetoothInterface::NotifyAclStateChangedCallback(
-    bt_status_t status, const bt_bdaddr_t& remote_bdaddr,
-    bt_acl_state_t state) {
+    bt_status_t status, const RawAddress& remote_bdaddr, bt_acl_state_t state) {
   FOR_EACH_OBSERVER(Observer, observers_,
                     AclStateChangedCallback(status, remote_bdaddr, state));
 }
@@ -152,8 +150,7 @@ const bt_interface_t* FakeBluetoothInterface::GetHALInterface() const {
   return &fake_bt_iface;
 }
 
-const bluetooth_device_t* FakeBluetoothInterface::GetHALAdapter() const {
-  // TODO(armansito): Do something meaningful here to simulate test behavior.
+bt_callbacks_t* FakeBluetoothInterface::GetHALCallbacks() const {
   return nullptr;
 }
 

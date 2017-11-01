@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- *  Copyright (C) 1999-2012 Broadcom Corporation
+ *  Copyright 1999-2012 Broadcom Corporation
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -26,6 +26,7 @@
 #if (SMP_DEBUG == TRUE)
 #include <stdio.h>
 #endif
+#include <base/bind.h>
 #include <string.h>
 #include "aes.h"
 #include "bt_utils.h"
@@ -38,23 +39,16 @@
 #include "p_256_ecc_pp.h"
 #include "smp_int.h"
 
+using base::Bind;
+
 #ifndef SMP_MAX_ENC_REPEAT
 #define SMP_MAX_ENC_REPEAT 3
 #endif
 
-static void smp_rand_back(tBTM_RAND_ENC* p);
-static void smp_generate_confirm(tSMP_CB* p_cb, tSMP_INT_DATA* p_data);
-static void smp_generate_ltk_cont(tSMP_CB* p_cb, tSMP_INT_DATA* p_data);
-static void smp_generate_y(tSMP_CB* p_cb, tSMP_INT_DATA* p);
-static void smp_generate_rand_vector(tSMP_CB* p_cb, tSMP_INT_DATA* p);
 static void smp_process_stk(tSMP_CB* p_cb, tSMP_ENC* p);
-static void smp_process_ediv(tSMP_CB* p_cb, tSMP_ENC* p);
 static bool smp_calculate_legacy_short_term_key(tSMP_CB* p_cb,
                                                 tSMP_ENC* output);
-static void smp_continue_private_key_creation(tSMP_CB* p_cb, tBTM_RAND_ENC* p);
 static void smp_process_private_key(tSMP_CB* p_cb);
-static void smp_finish_nonce_generation(tSMP_CB* p_cb);
-static void smp_process_new_nonce(tSMP_CB* p_cb);
 
 #define SMP_PASSKEY_MASK 0xfff00000
 
@@ -169,23 +163,6 @@ bool smp_encrypt_data(uint8_t* key, uint8_t key_len, uint8_t* plain_text,
 
 /*******************************************************************************
  *
- * Function         smp_generate_passkey
- *
- * Description      This function is called to generate passkey.
- *
- * Returns          void
- *
- ******************************************************************************/
-void smp_generate_passkey(tSMP_CB* p_cb, UNUSED_ATTR tSMP_INT_DATA* p_data) {
-  SMP_TRACE_DEBUG("%s", __func__);
-  p_cb->rand_enc_proc_state = SMP_GEN_TK;
-
-  /* generate MRand or SRand */
-  btsnd_hcic_ble_rand((void*)smp_rand_back);
-}
-
-/*******************************************************************************
- *
  * Function         smp_proc_passkey
  *
  * Description      This function is called to process a passkey.
@@ -193,11 +170,10 @@ void smp_generate_passkey(tSMP_CB* p_cb, UNUSED_ATTR tSMP_INT_DATA* p_data) {
  * Returns          void
  *
  ******************************************************************************/
-void smp_proc_passkey(tSMP_CB* p_cb, tBTM_RAND_ENC* p) {
+void smp_proc_passkey(tSMP_CB* p_cb, BT_OCTET8 rand) {
   uint8_t* tt = p_cb->tk;
-  tSMP_KEY key;
   uint32_t passkey; /* 19655 test number; */
-  uint8_t* pp = p->param_buf;
+  uint8_t* pp = rand;
 
   SMP_TRACE_DEBUG("%s", __func__);
   STREAM_TO_UINT32(passkey, pp);
@@ -210,19 +186,40 @@ void smp_proc_passkey(tSMP_CB* p_cb, tBTM_RAND_ENC* p) {
   memset(p_cb->tk, 0, BT_OCTET16_LEN);
   UINT32_TO_STREAM(tt, passkey);
 
-  key.key_type = SMP_KEY_TYPE_TK;
-  key.p_data = p_cb->tk;
-
   if (p_cb->p_callback) {
+    tSMP_EVT_DATA smp_evt_data;
+    smp_evt_data.passkey = passkey;
     (*p_cb->p_callback)(SMP_PASSKEY_NOTIF_EVT, p_cb->pairing_bda,
-                        (tSMP_EVT_DATA*)&passkey);
+                        &smp_evt_data);
   }
 
   if (p_cb->selected_association_model == SMP_MODEL_SEC_CONN_PASSKEY_DISP) {
-    smp_sm_event(&smp_cb, SMP_KEY_READY_EVT, &passkey);
+    tSMP_INT_DATA smp_int_data;
+    smp_int_data.passkey = passkey;
+    smp_sm_event(&smp_cb, SMP_KEY_READY_EVT, &smp_int_data);
   } else {
-    smp_sm_event(p_cb, SMP_KEY_READY_EVT, (tSMP_INT_DATA*)&key);
+    tSMP_KEY key;
+    key.key_type = SMP_KEY_TYPE_TK;
+    key.p_data = p_cb->tk;
+    tSMP_INT_DATA smp_int_data;
+    smp_int_data.key = key;
+    smp_sm_event(p_cb, SMP_KEY_READY_EVT, &smp_int_data);
   }
+}
+
+/*******************************************************************************
+ *
+ * Function         smp_generate_passkey
+ *
+ * Description      This function is called to generate passkey.
+ *
+ * Returns          void
+ *
+ ******************************************************************************/
+void smp_generate_passkey(tSMP_CB* p_cb, UNUSED_ATTR tSMP_INT_DATA* p_data) {
+  SMP_TRACE_DEBUG("%s", __func__);
+  /* generate MRand or SRand */
+  btsnd_hcic_ble_rand(Bind(&smp_proc_passkey, p_cb));
 }
 
 /*******************************************************************************
@@ -238,7 +235,6 @@ void smp_proc_passkey(tSMP_CB* p_cb, tBTM_RAND_ENC* p) {
  ******************************************************************************/
 void smp_generate_stk(tSMP_CB* p_cb, UNUSED_ATTR tSMP_INT_DATA* p_data) {
   tSMP_ENC output;
-  tSMP_STATUS status = SMP_PAIR_FAIL_UNKNOWN;
 
   SMP_TRACE_DEBUG("%s", __func__);
 
@@ -250,106 +246,28 @@ void smp_generate_stk(tSMP_CB* p_cb, UNUSED_ATTR tSMP_INT_DATA* p_data) {
     memcpy(output.param_buf, p_cb->ltk, SMP_ENCRYT_DATA_SIZE);
   } else if (!smp_calculate_legacy_short_term_key(p_cb, &output)) {
     SMP_TRACE_ERROR("%s failed", __func__);
-    smp_sm_event(p_cb, SMP_AUTH_CMPL_EVT, &status);
+    tSMP_INT_DATA smp_int_data;
+    smp_int_data.status = SMP_PAIR_FAIL_UNKNOWN;
+    smp_sm_event(p_cb, SMP_AUTH_CMPL_EVT, &smp_int_data);
     return;
   }
 
   smp_process_stk(p_cb, &output);
 }
 
-/*******************************************************************************
- *
- * Function         smp_generate_srand_mrand_confirm
- *
- * Description      This function is called to start the second pairing phase by
- *                  start generating random number.
- *
- *
- * Returns          void
- *
- ******************************************************************************/
-void smp_generate_srand_mrand_confirm(tSMP_CB* p_cb,
-                                      UNUSED_ATTR tSMP_INT_DATA* p_data) {
-  SMP_TRACE_DEBUG("%s", __func__);
-  p_cb->rand_enc_proc_state = SMP_GEN_SRAND_MRAND;
-  /* generate MRand or SRand */
-  btsnd_hcic_ble_rand((void*)smp_rand_back);
-}
-
-/*******************************************************************************
- *
- * Function         smp_generate_rand_cont
- *
- * Description      This function is called to generate another 64 bits random
- *                  for MRand or Srand.
- *
- * Returns          void
- *
- ******************************************************************************/
-void smp_generate_rand_cont(tSMP_CB* p_cb, UNUSED_ATTR tSMP_INT_DATA* p_data) {
-  SMP_TRACE_DEBUG("%s", __func__);
-  p_cb->rand_enc_proc_state = SMP_GEN_SRAND_MRAND_CONT;
-  /* generate 64 MSB of MRand or SRand */
-  btsnd_hcic_ble_rand((void*)smp_rand_back);
-}
-
-/*******************************************************************************
- *
- * Function         smp_generate_ltk
- *
- * Description      This function is called:
- *                  - in legacy pairing - to calculate LTK, starting with DIV
- *                    generation;
- *                  - in LE Secure Connections pairing over LE transport - to
- *                    process LTK already generated to encrypt LE link;
- *                  - in LE Secure Connections pairing over BR/EDR transport -
- *                    to start BR/EDR Link Key processing.
- *
- * Returns          void
- *
- ******************************************************************************/
-void smp_generate_ltk(tSMP_CB* p_cb, UNUSED_ATTR tSMP_INT_DATA* p_data) {
-  bool div_status;
-  SMP_TRACE_DEBUG("%s", __func__);
-  if (smp_get_br_state() == SMP_BR_STATE_BOND_PENDING) {
-    smp_br_process_link_key(p_cb, NULL);
-    return;
-  } else if (p_cb->le_secure_connections_mode_is_used) {
-    smp_process_secure_connection_long_term_key();
-    return;
-  }
-
-  div_status = btm_get_local_div(p_cb->pairing_bda, &p_cb->div);
-
-  if (div_status) {
-    smp_generate_ltk_cont(p_cb, NULL);
-  } else {
-    SMP_TRACE_DEBUG("Generate DIV for LTK");
-    p_cb->rand_enc_proc_state = SMP_GEN_DIV_LTK;
-    /* generate MRand or SRand */
-    btsnd_hcic_ble_rand((void*)smp_rand_back);
-  }
-}
-
-/*******************************************************************************
- *
- * Function         smp_compute_csrk
- *
- * Description      This function is called to calculate CSRK
- *
- *
- * Returns          void
- *
- ******************************************************************************/
-void smp_compute_csrk(tSMP_CB* p_cb, UNUSED_ATTR tSMP_INT_DATA* p_data) {
+/**
+ * This function is called to calculate CSRK
+ */
+void smp_compute_csrk(uint16_t div, tSMP_CB* p_cb) {
   BT_OCTET16 er;
   uint8_t buffer[4]; /* for (r || DIV)  r=1*/
   uint16_t r = 1;
   uint8_t* p = buffer;
   tSMP_ENC output;
-  tSMP_STATUS status = SMP_PAIR_FAIL_UNKNOWN;
 
-  SMP_TRACE_DEBUG("smp_compute_csrk div=%x", p_cb->div);
+  p_cb->div = div;
+
+  SMP_TRACE_DEBUG("%s: div=%x", __func__, p_cb->div);
   BTM_GetDeviceEncRoot(er);
   /* CSRK = d1(ER, DIV, 1) */
   UINT16_TO_STREAM(p, p_cb->div);
@@ -357,10 +275,12 @@ void smp_compute_csrk(tSMP_CB* p_cb, UNUSED_ATTR tSMP_INT_DATA* p_data) {
 
   if (!SMP_Encrypt(er, BT_OCTET16_LEN, buffer, 4, &output)) {
     SMP_TRACE_ERROR("smp_generate_csrk failed");
+    tSMP_INT_DATA smp_int_data;
+    smp_int_data.status = SMP_PAIR_FAIL_UNKNOWN;
     if (p_cb->smp_over_br) {
-      smp_br_state_machine_event(p_cb, SMP_BR_AUTH_CMPL_EVT, &status);
+      smp_br_state_machine_event(p_cb, SMP_BR_AUTH_CMPL_EVT, &smp_int_data);
     } else {
-      smp_sm_event(p_cb, SMP_AUTH_CMPL_EVT, &status);
+      smp_sm_event(p_cb, SMP_AUTH_CMPL_EVT, &smp_int_data);
     }
   } else {
     memcpy((void*)p_cb->csrk, output.param_buf, BT_OCTET16_LEN);
@@ -368,17 +288,9 @@ void smp_compute_csrk(tSMP_CB* p_cb, UNUSED_ATTR tSMP_INT_DATA* p_data) {
   }
 }
 
-/*******************************************************************************
- *
- * Function         smp_generate_csrk
- *
- * Description      This function is called to calculate CSRK, starting with DIV
- *                  generation.
- *
- *
- * Returns          void
- *
- ******************************************************************************/
+/**
+ * This function is called to calculate CSRK, starting with DIV generation.
+ */
 void smp_generate_csrk(tSMP_CB* p_cb, UNUSED_ATTR tSMP_INT_DATA* p_data) {
   bool div_status;
 
@@ -386,11 +298,16 @@ void smp_generate_csrk(tSMP_CB* p_cb, UNUSED_ATTR tSMP_INT_DATA* p_data) {
 
   div_status = btm_get_local_div(p_cb->pairing_bda, &p_cb->div);
   if (div_status) {
-    smp_compute_csrk(p_cb, NULL);
+    smp_compute_csrk(p_cb->div, p_cb);
   } else {
     SMP_TRACE_DEBUG("Generate DIV for CSRK");
-    p_cb->rand_enc_proc_state = SMP_GEN_DIV_CSRK;
-    btsnd_hcic_ble_rand((void*)smp_rand_back);
+    btsnd_hcic_ble_rand(Bind(
+        [](tSMP_CB* p_cb, BT_OCTET8 rand) {
+          uint16_t div;
+          STREAM_TO_UINT16(div, rand);
+          smp_compute_csrk(div, p_cb);
+        },
+        p_cb));
   }
 }
 
@@ -483,7 +400,8 @@ void smp_gen_p1_4_confirm(tSMP_CB* p_cb, tBLE_ADDR_TYPE remote_bd_addr_type,
  * Returns          void
  *
  ******************************************************************************/
-void smp_gen_p2_4_confirm(tSMP_CB* p_cb, BD_ADDR remote_bda, BT_OCTET16 p2) {
+void smp_gen_p2_4_confirm(tSMP_CB* p_cb, const RawAddress& remote_bda,
+                          BT_OCTET16 p2) {
   SMP_TRACE_DEBUG("%s", __func__);
   uint8_t* p = (uint8_t*)p2;
   /* 32-bit Padding */
@@ -514,7 +432,7 @@ void smp_gen_p2_4_confirm(tSMP_CB* p_cb, BD_ADDR remote_bda, BT_OCTET16 p2) {
 tSMP_STATUS smp_calculate_comfirm(tSMP_CB* p_cb, BT_OCTET16 rand,
                                   tSMP_ENC* output) {
   SMP_TRACE_DEBUG("%s", __func__);
-  BD_ADDR remote_bda;
+  RawAddress remote_bda;
   tBLE_ADDR_TYPE remote_bd_addr_type = 0;
   /* get remote connection specific bluetooth address */
   if (!BTM_ReadRemoteConnectionAddr(p_cb->pairing_bda, remote_bda,
@@ -564,15 +482,15 @@ tSMP_STATUS smp_calculate_comfirm(tSMP_CB* p_cb, BT_OCTET16 rand,
  * Returns          void
  *
  ******************************************************************************/
-static void smp_generate_confirm(tSMP_CB* p_cb,
-                                 UNUSED_ATTR tSMP_INT_DATA* p_data) {
+static void smp_generate_confirm(tSMP_CB* p_cb) {
   SMP_TRACE_DEBUG("%s", __func__);
-  p_cb->rand_enc_proc_state = SMP_GEN_CONFIRM;
   smp_debug_print_nbyte_little_endian((uint8_t*)p_cb->rand, "local_rand", 16);
   tSMP_ENC output;
   tSMP_STATUS status = smp_calculate_comfirm(p_cb, p_cb->rand, &output);
   if (status != SMP_SUCCESS) {
-    smp_sm_event(p_cb, SMP_AUTH_CMPL_EVT, &status);
+    tSMP_INT_DATA smp_int_data;
+    smp_int_data.status = status;
+    smp_sm_event(p_cb, SMP_AUTH_CMPL_EVT, &smp_int_data);
     return;
   }
   tSMP_KEY key;
@@ -581,7 +499,39 @@ static void smp_generate_confirm(tSMP_CB* p_cb,
                                       16);
   key.key_type = SMP_KEY_TYPE_CFM;
   key.p_data = output.param_buf;
-  smp_sm_event(p_cb, SMP_KEY_READY_EVT, &key);
+  tSMP_INT_DATA smp_int_data;
+  smp_int_data.key = key;
+  smp_sm_event(p_cb, SMP_KEY_READY_EVT, &smp_int_data);
+}
+
+/*******************************************************************************
+ *
+ * Function         smp_generate_srand_mrand_confirm
+ *
+ * Description      This function is called to start the second pairing phase by
+ *                  start generating random number.
+ *
+ *
+ * Returns          void
+ *
+ ******************************************************************************/
+void smp_generate_srand_mrand_confirm(tSMP_CB* p_cb,
+                                      UNUSED_ATTR tSMP_INT_DATA* p_data) {
+  SMP_TRACE_DEBUG("%s", __func__);
+  /* generate MRand or SRand */
+  btsnd_hcic_ble_rand(Bind(
+      [](tSMP_CB* p_cb, BT_OCTET8 rand) {
+        memcpy((void*)p_cb->rand, rand, 8);
+
+        /* generate 64 MSB of MRand or SRand */
+        btsnd_hcic_ble_rand(Bind(
+            [](tSMP_CB* p_cb, BT_OCTET8 rand) {
+              memcpy((void*)&p_cb->rand[8], rand, BT_OCTET8_LEN);
+              smp_generate_confirm(p_cb);
+            },
+            p_cb));
+      },
+      p_cb));
 }
 
 /*******************************************************************************
@@ -598,12 +548,13 @@ static void smp_generate_confirm(tSMP_CB* p_cb,
  ******************************************************************************/
 void smp_generate_compare(tSMP_CB* p_cb, UNUSED_ATTR tSMP_INT_DATA* p_data) {
   SMP_TRACE_DEBUG("smp_generate_compare ");
-  p_cb->rand_enc_proc_state = SMP_GEN_COMPARE;
   smp_debug_print_nbyte_little_endian((uint8_t*)p_cb->rrand, "peer rand", 16);
   tSMP_ENC output;
   tSMP_STATUS status = smp_calculate_comfirm(p_cb, p_cb->rrand, &output);
   if (status != SMP_SUCCESS) {
-    smp_sm_event(p_cb, SMP_AUTH_CMPL_EVT, &status);
+    tSMP_INT_DATA smp_int_data;
+    smp_int_data.status = status;
+    smp_sm_event(p_cb, SMP_AUTH_CMPL_EVT, &smp_int_data);
     return;
   }
   tSMP_KEY key;
@@ -611,7 +562,9 @@ void smp_generate_compare(tSMP_CB* p_cb, UNUSED_ATTR tSMP_INT_DATA* p_data) {
                                       "Remote Confirm generated", 16);
   key.key_type = SMP_KEY_TYPE_CMP;
   key.p_data = output.param_buf;
-  smp_sm_event(p_cb, SMP_KEY_READY_EVT, &key);
+  tSMP_INT_DATA smp_int_data;
+  smp_int_data.key = key;
+  smp_sm_event(p_cb, SMP_KEY_READY_EVT, &smp_int_data);
 }
 
 /*******************************************************************************
@@ -636,94 +589,14 @@ static void smp_process_stk(tSMP_CB* p_cb, tSMP_ENC* p) {
   key.key_type = SMP_KEY_TYPE_STK;
   key.p_data = p->param_buf;
 
-  smp_sm_event(p_cb, SMP_KEY_READY_EVT, &key);
+  tSMP_INT_DATA smp_int_data;
+  smp_int_data.key = key;
+  smp_sm_event(p_cb, SMP_KEY_READY_EVT, &smp_int_data);
 }
 
-/*******************************************************************************
- *
- * Function         smp_generate_ltk_cont
- *
- * Description      Calculate LTK = d1(ER, DIV, 0)= e(ER, DIV)
- *
- * Returns          void
- *
- ******************************************************************************/
-static void smp_generate_ltk_cont(tSMP_CB* p_cb,
-                                  UNUSED_ATTR tSMP_INT_DATA* p_data) {
-  BT_OCTET16 er;
-  tSMP_ENC output;
-  tSMP_STATUS status = SMP_PAIR_FAIL_UNKNOWN;
-
-  SMP_TRACE_DEBUG("%s", __func__);
-  BTM_GetDeviceEncRoot(er);
-
-  /* LTK = d1(ER, DIV, 0)= e(ER, DIV)*/
-  if (!SMP_Encrypt(er, BT_OCTET16_LEN, (uint8_t*)&p_cb->div, sizeof(uint16_t),
-                   &output)) {
-    SMP_TRACE_ERROR("%s failed", __func__);
-    smp_sm_event(p_cb, SMP_AUTH_CMPL_EVT, &status);
-  } else {
-    /* mask the LTK */
-    smp_mask_enc_key(p_cb->loc_enc_size, output.param_buf);
-    memcpy((void*)p_cb->ltk, output.param_buf, BT_OCTET16_LEN);
-    smp_generate_rand_vector(p_cb, NULL);
-  }
-}
-
-/*******************************************************************************
- *
- * Function         smp_generate_y
- *
- * Description      This function is to proceed generate Y = E(DHK, Rand)
- *
- * Returns          void
- *
- ******************************************************************************/
-static void smp_generate_y(tSMP_CB* p_cb, UNUSED_ATTR tSMP_INT_DATA* p) {
-  BT_OCTET16 dhk;
-  tSMP_ENC output;
-  tSMP_STATUS status = SMP_PAIR_FAIL_UNKNOWN;
-
-  SMP_TRACE_DEBUG("smp_generate_y ");
-  BTM_GetDeviceDHK(dhk);
-
-  if (!SMP_Encrypt(dhk, BT_OCTET16_LEN, p_cb->enc_rand, BT_OCTET8_LEN,
-                   &output)) {
-    SMP_TRACE_ERROR("smp_generate_y failed");
-    smp_sm_event(p_cb, SMP_AUTH_CMPL_EVT, &status);
-  } else {
-    smp_process_ediv(p_cb, &output);
-  }
-}
-
-/*******************************************************************************
- *
- * Function         smp_generate_rand_vector
- *
- * Description      This function is called when an LTK is generated, send state
- *                  machine event to SMP.
- *
- * Returns          void
- *
- ******************************************************************************/
-static void smp_generate_rand_vector(tSMP_CB* p_cb,
-                                     UNUSED_ATTR tSMP_INT_DATA* p) {
-  /* generate EDIV and rand now */
-  /* generate random vector */
-  SMP_TRACE_DEBUG("smp_generate_rand_vector ");
-  p_cb->rand_enc_proc_state = SMP_GEN_RAND_V;
-  btsnd_hcic_ble_rand((void*)smp_rand_back);
-}
-
-/*******************************************************************************
- *
- * Function         smp_process_ediv
- *
- * Description      This function is to calculate EDIV = Y xor DIV
- *
- * Returns          void
- *
- ******************************************************************************/
+/**
+ * This function is to calculate EDIV = Y xor DIV
+ */
 static void smp_process_ediv(tSMP_CB* p_cb, tSMP_ENC* p) {
   tSMP_KEY key;
   uint8_t* pp = p->param_buf;
@@ -739,7 +612,102 @@ static void smp_process_ediv(tSMP_CB* p_cb, tSMP_ENC* p) {
   key.key_type = SMP_KEY_TYPE_LTK;
   key.p_data = p->param_buf;
 
-  smp_sm_event(p_cb, SMP_KEY_READY_EVT, &key);
+  tSMP_INT_DATA smp_int_data;
+  smp_int_data.key = key;
+  smp_sm_event(p_cb, SMP_KEY_READY_EVT, &smp_int_data);
+}
+
+/**
+ * This function is to proceed generate Y = E(DHK, Rand)
+ */
+static void smp_generate_y(tSMP_CB* p_cb, BT_OCTET8 rand) {
+  SMP_TRACE_DEBUG("%s ", __func__);
+
+  BT_OCTET16 dhk;
+  BTM_GetDeviceDHK(dhk);
+
+  memcpy(p_cb->enc_rand, rand, BT_OCTET8_LEN);
+  tSMP_ENC output;
+  if (!SMP_Encrypt(dhk, BT_OCTET16_LEN, rand, BT_OCTET8_LEN, &output)) {
+    SMP_TRACE_ERROR("%s failed", __func__);
+    tSMP_INT_DATA smp_int_data;
+    smp_int_data.status = SMP_PAIR_FAIL_UNKNOWN;
+    smp_sm_event(p_cb, SMP_AUTH_CMPL_EVT, &smp_int_data);
+  } else {
+    smp_process_ediv(p_cb, &output);
+  }
+}
+
+/**
+ * Calculate LTK = d1(ER, DIV, 0)= e(ER, DIV)
+ */
+static void smp_generate_ltk_cont(uint16_t div, tSMP_CB* p_cb) {
+  p_cb->div = div;
+
+  SMP_TRACE_DEBUG("%s", __func__);
+  BT_OCTET16 er;
+  BTM_GetDeviceEncRoot(er);
+
+  tSMP_ENC output;
+  /* LTK = d1(ER, DIV, 0)= e(ER, DIV)*/
+  if (!SMP_Encrypt(er, BT_OCTET16_LEN, (uint8_t*)&p_cb->div, sizeof(uint16_t),
+                   &output)) {
+    SMP_TRACE_ERROR("%s failed", __func__);
+    tSMP_INT_DATA smp_int_data;
+    smp_int_data.status = SMP_PAIR_FAIL_UNKNOWN;
+    smp_sm_event(p_cb, SMP_AUTH_CMPL_EVT, &smp_int_data);
+  } else {
+    /* mask the LTK */
+    smp_mask_enc_key(p_cb->loc_enc_size, output.param_buf);
+    memcpy((void*)p_cb->ltk, output.param_buf, BT_OCTET16_LEN);
+
+    /* generate EDIV and rand now */
+    btsnd_hcic_ble_rand(Bind(&smp_generate_y, p_cb));
+  }
+}
+
+/*******************************************************************************
+ *
+ * Function         smp_generate_ltk
+ *
+ * Description      This function is called:
+ *                  - in legacy pairing - to calculate LTK, starting with DIV
+ *                    generation;
+ *                  - in LE Secure Connections pairing over LE transport - to
+ *                    process LTK already generated to encrypt LE link;
+ *                  - in LE Secure Connections pairing over BR/EDR transport -
+ *                    to start BR/EDR Link Key processing.
+ *
+ * Returns          void
+ *
+ ******************************************************************************/
+void smp_generate_ltk(tSMP_CB* p_cb, UNUSED_ATTR tSMP_INT_DATA* p_data) {
+  SMP_TRACE_DEBUG("%s", __func__);
+
+  if (smp_get_br_state() == SMP_BR_STATE_BOND_PENDING) {
+    smp_br_process_link_key(p_cb, NULL);
+    return;
+  } else if (p_cb->le_secure_connections_mode_is_used) {
+    smp_process_secure_connection_long_term_key();
+    return;
+  }
+
+  bool div_status = btm_get_local_div(p_cb->pairing_bda, &p_cb->div);
+
+  if (div_status) {
+    smp_generate_ltk_cont(p_cb->div, p_cb);
+  } else {
+    SMP_TRACE_DEBUG("%s: Generate DIV for LTK", __func__);
+
+    /* generate MRand or SRand */
+    btsnd_hcic_ble_rand(Bind(
+        [](tSMP_CB* p_cb, BT_OCTET8 rand) {
+          uint16_t div;
+          STREAM_TO_UINT16(div, rand);
+          smp_generate_ltk_cont(div, p_cb);
+        },
+        p_cb));
+  }
 }
 
 /*******************************************************************************
@@ -752,10 +720,10 @@ static void smp_process_ediv(tSMP_CB* p_cb, tSMP_ENC* p) {
  *
  ******************************************************************************/
 bool smp_calculate_legacy_short_term_key(tSMP_CB* p_cb, tSMP_ENC* output) {
+  SMP_TRACE_DEBUG("%s", __func__);
+
   BT_OCTET16 ptext;
   uint8_t* p = ptext;
-
-  SMP_TRACE_DEBUG("%s", __func__);
   memset(p, 0, BT_OCTET16_LEN);
   if (p_cb->role == HCI_ROLE_MASTER) {
     memcpy(p, p_cb->rand, BT_OCTET8_LEN);
@@ -765,9 +733,8 @@ bool smp_calculate_legacy_short_term_key(tSMP_CB* p_cb, tSMP_ENC* output) {
     memcpy(&p[BT_OCTET8_LEN], p_cb->rand, BT_OCTET8_LEN);
   }
 
-  bool encrypted;
   /* generate STK = Etk(rand|rrand)*/
-  encrypted =
+  bool encrypted =
       SMP_Encrypt(p_cb->tk, BT_OCTET16_LEN, ptext, BT_OCTET16_LEN, output);
   if (!encrypted) {
     SMP_TRACE_ERROR("%s failed", __func__);
@@ -789,8 +756,29 @@ bool smp_calculate_legacy_short_term_key(tSMP_CB* p_cb, tSMP_ENC* output) {
  ******************************************************************************/
 void smp_create_private_key(tSMP_CB* p_cb, tSMP_INT_DATA* p_data) {
   SMP_TRACE_DEBUG("%s", __func__);
-  p_cb->rand_enc_proc_state = SMP_GENERATE_PRIVATE_KEY_0_7;
-  btsnd_hcic_ble_rand((void*)smp_rand_back);
+
+  btsnd_hcic_ble_rand(Bind(
+      [](tSMP_CB* p_cb, BT_OCTET8 rand) {
+        memcpy((void*)p_cb->private_key, rand, BT_OCTET8_LEN);
+        btsnd_hcic_ble_rand(Bind(
+            [](tSMP_CB* p_cb, BT_OCTET8 rand) {
+              memcpy((void*)&p_cb->private_key[8], rand, BT_OCTET8_LEN);
+              btsnd_hcic_ble_rand(Bind(
+                  [](tSMP_CB* p_cb, BT_OCTET8 rand) {
+                    memcpy((void*)&p_cb->private_key[16], rand, BT_OCTET8_LEN);
+                    btsnd_hcic_ble_rand(Bind(
+                        [](tSMP_CB* p_cb, BT_OCTET8 rand) {
+                          memcpy((void*)&p_cb->private_key[24], rand,
+                                 BT_OCTET8_LEN);
+                          smp_process_private_key(p_cb);
+                        },
+                        p_cb));
+                  },
+                  p_cb));
+            },
+            p_cb));
+      },
+      p_cb));
 }
 
 /*******************************************************************************
@@ -827,50 +815,6 @@ void smp_use_oob_private_key(tSMP_CB* p_cb, tSMP_INT_DATA* p_data) {
       smp_decide_association_model(p_cb, NULL);
       break;
   }
-}
-
-/*******************************************************************************
- *
- * Function         smp_continue_private_key_creation
- *
- * Description      This function is used to continue private key creation.
- *
- * Returns          void
- *
- ******************************************************************************/
-void smp_continue_private_key_creation(tSMP_CB* p_cb, tBTM_RAND_ENC* p) {
-  uint8_t state = p_cb->rand_enc_proc_state & ~0x80;
-  SMP_TRACE_DEBUG("%s state=0x%x", __func__, state);
-
-  switch (state) {
-    case SMP_GENERATE_PRIVATE_KEY_0_7:
-      memcpy((void*)p_cb->private_key, p->param_buf, p->param_len);
-      p_cb->rand_enc_proc_state = SMP_GENERATE_PRIVATE_KEY_8_15;
-      btsnd_hcic_ble_rand((void*)smp_rand_back);
-      break;
-
-    case SMP_GENERATE_PRIVATE_KEY_8_15:
-      memcpy((void*)&p_cb->private_key[8], p->param_buf, p->param_len);
-      p_cb->rand_enc_proc_state = SMP_GENERATE_PRIVATE_KEY_16_23;
-      btsnd_hcic_ble_rand((void*)smp_rand_back);
-      break;
-
-    case SMP_GENERATE_PRIVATE_KEY_16_23:
-      memcpy((void*)&p_cb->private_key[16], p->param_buf, p->param_len);
-      p_cb->rand_enc_proc_state = SMP_GENERATE_PRIVATE_KEY_24_31;
-      btsnd_hcic_ble_rand((void*)smp_rand_back);
-      break;
-
-    case SMP_GENERATE_PRIVATE_KEY_24_31:
-      memcpy((void*)&p_cb->private_key[24], p->param_buf, p->param_len);
-      smp_process_private_key(p_cb);
-      break;
-
-    default:
-      break;
-  }
-
-  return;
 }
 
 /*******************************************************************************
@@ -964,8 +908,8 @@ void smp_calculate_local_commitment(tSMP_CB* p_cb) {
     case SMP_MODEL_SEC_CONN_NUM_COMP:
       if (p_cb->role == HCI_ROLE_MASTER)
         SMP_TRACE_WARNING(
-            "local commitment calc on master is not expected \
-                                    for Just Works/Numeric Comparison models");
+            "local commitment calc on master is not expected "
+            "for Just Works/Numeric Comparison models");
       smp_calculate_f4(p_cb->loc_publ_key.x, p_cb->peer_publ_key.x, p_cb->rand,
                        0, p_cb->commitment);
       break;
@@ -1011,8 +955,8 @@ void smp_calculate_peer_commitment(tSMP_CB* p_cb, BT_OCTET16 output_buf) {
     case SMP_MODEL_SEC_CONN_NUM_COMP:
       if (p_cb->role == HCI_ROLE_SLAVE)
         SMP_TRACE_WARNING(
-            "peer commitment calc on slave is not expected \
-                for Just Works/Numeric Comparison models");
+            "peer commitment calc on slave is not expected "
+            "for Just Works/Numeric Comparison models");
       smp_calculate_f4(p_cb->peer_publ_key.x, p_cb->loc_publ_key.x, p_cb->rrand,
                        0, output_buf);
       break;
@@ -1129,16 +1073,19 @@ void smp_calculate_numeric_comparison_display_number(tSMP_CB* p_cb,
   }
 
   if (p_cb->number_to_display >= (BTM_MAX_PASSKEY_VAL + 1)) {
-    uint8_t reason;
-    reason = p_cb->failure = SMP_PAIR_FAIL_UNKNOWN;
-    smp_sm_event(p_cb, SMP_AUTH_CMPL_EVT, &reason);
+    tSMP_INT_DATA smp_int_data;
+    smp_int_data.status = SMP_PAIR_FAIL_UNKNOWN;
+    p_cb->failure = SMP_PAIR_FAIL_UNKNOWN;
+    smp_sm_event(p_cb, SMP_AUTH_CMPL_EVT, &smp_int_data);
     return;
   }
 
   SMP_TRACE_EVENT("Number to display in numeric comparison = %d",
                   p_cb->number_to_display);
   p_cb->cb_evt = SMP_NC_REQ_EVT;
-  smp_sm_event(p_cb, SMP_SC_DSPL_NC_EVT, &p_cb->number_to_display);
+  tSMP_INT_DATA smp_int_data;
+  smp_int_data.passkey = p_cb->number_to_display;
+  smp_sm_event(p_cb, SMP_SC_DSPL_NC_EVT, &smp_int_data);
   return;
 }
 
@@ -1580,7 +1527,6 @@ void smp_calculate_peer_dhkey_check(tSMP_CB* p_cb, tSMP_INT_DATA* p_data) {
   BT_OCTET16 param_buf;
   bool ret;
   tSMP_KEY key;
-  tSMP_STATUS status = SMP_PAIR_FAIL_UNKNOWN;
 
   SMP_TRACE_DEBUG("%s", __func__);
 
@@ -1599,10 +1545,14 @@ void smp_calculate_peer_dhkey_check(tSMP_CB* p_cb, tSMP_INT_DATA* p_data) {
 #endif
     key.key_type = SMP_KEY_TYPE_PEER_DHK_CHCK;
     key.p_data = param_buf;
-    smp_sm_event(p_cb, SMP_SC_KEY_READY_EVT, &key);
+    tSMP_INT_DATA smp_int_data;
+    smp_int_data.key = key;
+    smp_sm_event(p_cb, SMP_SC_KEY_READY_EVT, &smp_int_data);
   } else {
     SMP_TRACE_EVENT("peer DHKey check calculation failed");
-    smp_sm_event(p_cb, SMP_AUTH_CMPL_EVT, &status);
+    tSMP_INT_DATA smp_int_data;
+    smp_int_data.status = SMP_PAIR_FAIL_UNKNOWN;
+    smp_sm_event(p_cb, SMP_AUTH_CMPL_EVT, &smp_int_data);
   }
 }
 
@@ -1710,15 +1660,17 @@ bool smp_calculate_f6(uint8_t* w, uint8_t* n1, uint8_t* n2, uint8_t* r,
  ******************************************************************************/
 bool smp_calculate_link_key_from_long_term_key(tSMP_CB* p_cb) {
   tBTM_SEC_DEV_REC* p_dev_rec;
-  BD_ADDR bda_for_lk;
+  RawAddress bda_for_lk;
   tBLE_ADDR_TYPE conn_addr_type;
+  BT_OCTET16 salt = {0x31, 0x70, 0x6D, 0x74, 0x00, 0x00, 0x00, 0x00,
+                     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
 
   SMP_TRACE_DEBUG("%s", __func__);
 
   if (p_cb->id_addr_rcvd && p_cb->id_addr_type == BLE_ADDR_PUBLIC) {
     SMP_TRACE_DEBUG(
         "Use rcvd identity address as BD_ADDR of LK rcvd identity address");
-    memcpy(bda_for_lk, p_cb->id_addr, BD_ADDR_LEN);
+    bda_for_lk = p_cb->id_addr;
   } else if ((BTM_ReadRemoteConnectionAddr(p_cb->pairing_bda, bda_for_lk,
                                            &conn_addr_type)) &&
              conn_addr_type == BLE_ADDR_PUBLIC) {
@@ -1737,8 +1689,11 @@ bool smp_calculate_link_key_from_long_term_key(tSMP_CB* p_cb) {
   BT_OCTET16 intermediate_link_key;
   bool ret = true;
 
-  ret = smp_calculate_h6(p_cb->ltk, (uint8_t*)"1pmt" /* reversed "tmp1" */,
-                         intermediate_link_key);
+  if (p_cb->key_derivation_h7_used)
+    ret = smp_calculate_h7((uint8_t*)salt, p_cb->ltk, intermediate_link_key);
+  else
+    ret = smp_calculate_h6(p_cb->ltk, (uint8_t*)"1pmt" /* reversed "tmp1" */,
+                           intermediate_link_key);
   if (!ret) {
     SMP_TRACE_ERROR("%s failed to derive intermediate_link_key", __func__);
     return ret;
@@ -1802,6 +1757,8 @@ bool smp_calculate_long_term_key_from_link_key(tSMP_CB* p_cb) {
   bool ret = true;
   tBTM_SEC_DEV_REC* p_dev_rec;
   uint8_t rev_link_key[16];
+  BT_OCTET16 salt = {0x32, 0x70, 0x6D, 0x74, 0x00, 0x00, 0x00, 0x00,
+                     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
 
   SMP_TRACE_DEBUG("%s", __func__);
 
@@ -1832,9 +1789,14 @@ bool smp_calculate_long_term_key_from_link_key(tSMP_CB* p_cb) {
   REVERSE_ARRAY_TO_STREAM(p1, p2, 16);
 
   BT_OCTET16 intermediate_long_term_key;
-  /* "tmp2" obtained from the spec */
-  ret = smp_calculate_h6(rev_link_key, (uint8_t*)"2pmt" /* reversed "tmp2" */,
-                         intermediate_long_term_key);
+  if (p_cb->key_derivation_h7_used) {
+    ret = smp_calculate_h7((uint8_t*)salt, rev_link_key,
+                           intermediate_long_term_key);
+  } else {
+    /* "tmp2" obtained from the spec */
+    ret = smp_calculate_h6(rev_link_key, (uint8_t*)"2pmt" /* reversed "tmp2" */,
+                           intermediate_long_term_key);
+  }
 
   if (!ret) {
     SMP_TRACE_ERROR("%s failed to derive intermediate_long_term_key", __func__);
@@ -1928,119 +1890,63 @@ bool smp_calculate_h6(uint8_t* w, uint8_t* keyid, uint8_t* c) {
 }
 
 /*******************************************************************************
- *
- * Function         smp_start_nonce_generation
- *
- * Description      This function starts nonce generation.
- *
- * Returns          void
- *
- ******************************************************************************/
-void smp_start_nonce_generation(tSMP_CB* p_cb) {
-  SMP_TRACE_DEBUG("%s", __func__);
-  p_cb->rand_enc_proc_state = SMP_GEN_NONCE_0_7;
-  btsnd_hcic_ble_rand((void*)smp_rand_back);
-}
+**
+** Function         smp_calculate_h7
+**
+** Description      The function calculates
+**                  C = h7(SALT, W) = AES-CMAC   (W)
+**                                            SALT
+**                  where
+**                  input:  W is 128 bit,
+**                          SALT is 128 bit,
+**                  output: C is 128 bit.
+**
+** Returns          FALSE if out of resources, TRUE in other cases.
+**
+** Note             The LSB is the first octet, the MSB is the last octet of
+**                  the AES-CMAC input/output stream.
+**
+*******************************************************************************/
+bool smp_calculate_h7(uint8_t* salt, uint8_t* w, uint8_t* c) {
+  SMP_TRACE_DEBUG("%s", __FUNCTION__);
 
-/*******************************************************************************
- *
- * Function         smp_finish_nonce_generation
- *
- * Description      This function finishes nonce generation.
- *
- * Returns          void
- *
- ******************************************************************************/
-void smp_finish_nonce_generation(tSMP_CB* p_cb) {
-  SMP_TRACE_DEBUG("%s", __func__);
-  p_cb->rand_enc_proc_state = SMP_GEN_NONCE_8_15;
-  btsnd_hcic_ble_rand((void*)smp_rand_back);
-}
+  uint8_t key[BT_OCTET16_LEN];
+  uint8_t* p = key;
+  ARRAY_TO_STREAM(p, salt, BT_OCTET16_LEN);
 
-/*******************************************************************************
- *
- * Function         smp_process_new_nonce
- *
- * Description      This function notifies SM that it has new nonce.
- *
- * Returns          void
- *
- ******************************************************************************/
-void smp_process_new_nonce(tSMP_CB* p_cb) {
-  SMP_TRACE_DEBUG("%s round %d", __func__, p_cb->round);
-  smp_sm_event(p_cb, SMP_HAVE_LOC_NONCE_EVT, NULL);
-}
+  uint8_t msg_len = BT_OCTET16_LEN /* msg size */;
+  uint8_t msg[BT_OCTET16_LEN];
+  p = msg;
+  ARRAY_TO_STREAM(p, w, BT_OCTET16_LEN);
 
-/*******************************************************************************
- *
- * Function         smp_rand_back
- *
- * Description      This function is to process the rand command finished,
- *                  process the random/encrypted number for further action.
- *
- * Returns          void
- *
- ******************************************************************************/
-static void smp_rand_back(tBTM_RAND_ENC* p) {
-  tSMP_CB* p_cb = &smp_cb;
-  uint8_t* pp = p->param_buf;
-  uint8_t failure = SMP_PAIR_FAIL_UNKNOWN;
-  uint8_t state = p_cb->rand_enc_proc_state & ~0x80;
-
-  SMP_TRACE_DEBUG("%s state=0x%x", __func__, state);
-  if (p && p->status == HCI_SUCCESS) {
-    switch (state) {
-      case SMP_GEN_SRAND_MRAND:
-        memcpy((void*)p_cb->rand, p->param_buf, p->param_len);
-        smp_generate_rand_cont(p_cb, NULL);
-        break;
-
-      case SMP_GEN_SRAND_MRAND_CONT:
-        memcpy((void*)&p_cb->rand[8], p->param_buf, p->param_len);
-        smp_generate_confirm(p_cb, NULL);
-        break;
-
-      case SMP_GEN_DIV_LTK:
-        STREAM_TO_UINT16(p_cb->div, pp);
-        smp_generate_ltk_cont(p_cb, NULL);
-        break;
-
-      case SMP_GEN_DIV_CSRK:
-        STREAM_TO_UINT16(p_cb->div, pp);
-        smp_compute_csrk(p_cb, NULL);
-        break;
-
-      case SMP_GEN_TK:
-        smp_proc_passkey(p_cb, p);
-        break;
-
-      case SMP_GEN_RAND_V:
-        memcpy(p_cb->enc_rand, p->param_buf, BT_OCTET8_LEN);
-        smp_generate_y(p_cb, NULL);
-        break;
-
-      case SMP_GENERATE_PRIVATE_KEY_0_7:
-      case SMP_GENERATE_PRIVATE_KEY_8_15:
-      case SMP_GENERATE_PRIVATE_KEY_16_23:
-      case SMP_GENERATE_PRIVATE_KEY_24_31:
-        smp_continue_private_key_creation(p_cb, p);
-        break;
-
-      case SMP_GEN_NONCE_0_7:
-        memcpy((void*)p_cb->rand, p->param_buf, p->param_len);
-        smp_finish_nonce_generation(p_cb);
-        break;
-
-      case SMP_GEN_NONCE_8_15:
-        memcpy((void*)&p_cb->rand[8], p->param_buf, p->param_len);
-        smp_process_new_nonce(p_cb);
-        break;
-    }
-
-    return;
+  bool ret = true;
+  uint8_t cmac[BT_OCTET16_LEN];
+  if (!aes_cipher_msg_auth_code(key, msg, msg_len, BT_OCTET16_LEN, cmac)) {
+    SMP_TRACE_ERROR("%s failed", __FUNCTION__);
+    ret = false;
   }
 
-  SMP_TRACE_ERROR("%s key generation failed: (%d)", __func__,
-                  p_cb->rand_enc_proc_state);
-  smp_sm_event(p_cb, SMP_AUTH_CMPL_EVT, &failure);
+  p = c;
+  ARRAY_TO_STREAM(p, cmac, BT_OCTET16_LEN);
+  return ret;
+}
+
+/**
+ * This function generates nonce.
+ */
+void smp_start_nonce_generation(tSMP_CB* p_cb) {
+  SMP_TRACE_DEBUG("%s", __func__);
+  btsnd_hcic_ble_rand(Bind(
+      [](tSMP_CB* p_cb, BT_OCTET8 rand) {
+        memcpy((void*)p_cb->rand, rand, BT_OCTET8_LEN);
+        btsnd_hcic_ble_rand(Bind(
+            [](tSMP_CB* p_cb, BT_OCTET8 rand) {
+              memcpy((void*)&p_cb->rand[8], rand, BT_OCTET8_LEN);
+              SMP_TRACE_DEBUG("%s round %d", __func__, p_cb->round);
+              /* notifies SM that it has new nonce. */
+              smp_sm_event(p_cb, SMP_HAVE_LOC_NONCE_EVT, NULL);
+            },
+            p_cb));
+      },
+      p_cb));
 }

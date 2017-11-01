@@ -1,6 +1,6 @@
 /******************************************************************************
  *
- *  Copyright (C) 1999-2012 Broadcom Corporation
+ *  Copyright 1999-2012 Broadcom Corporation
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -21,6 +21,7 @@
 
 #include <base/callback_forward.h>
 #include <hardware/bt_common_types.h>
+#include <vector>
 
 #define CHNL_MAP_LEN 5
 typedef uint8_t tBTM_BLE_CHNL_MAP[CHNL_MAP_LEN];
@@ -183,7 +184,7 @@ typedef uint8_t tBTM_BLE_SFP;
 
 /* default supervision timeout */
 #ifndef BTM_BLE_CONN_TIMEOUT_DEF
-#define BTM_BLE_CONN_TIMEOUT_DEF 2000
+#define BTM_BLE_CONN_TIMEOUT_DEF 500
 #endif
 
 /* minimum supervision timeout */
@@ -461,7 +462,7 @@ using tBTM_BLE_PF_PARAM_CB = base::Callback<void(
 typedef union {
   uint16_t uuid16_mask;
   uint32_t uuid32_mask;
-  uint8_t uuid128_mask[LEN_UUID_128];
+  uint8_t uuid128_mask[bluetooth::Uuid::kNumBytes128];
 } tBTM_BLE_PF_COND_MASK;
 
 /* per device filter + one generic filter indexed by 0 */
@@ -473,7 +474,7 @@ typedef union {
 
 typedef struct {
   bool in_use;
-  BD_ADDR bd_addr;
+  RawAddress bd_addr;
   uint8_t pf_counter[BTM_BLE_PF_TYPE_MAX]; /* number of filter indexed by
                                               tBTM_BLE_PF_COND_TYPE */
 } tBTM_BLE_PF_COUNT;
@@ -540,19 +541,8 @@ typedef struct {
   tBTM_BLE_ENERGY_INFO_CBACK* p_ener_cback;
 } tBTM_BLE_ENERGY_INFO_CB;
 
-typedef bool(tBTM_BLE_SEL_CBACK)(BD_ADDR random_bda, uint8_t* p_remote_name);
 typedef void(tBTM_BLE_CTRL_FEATURES_CBACK)(tBTM_STATUS status);
 
-/* callback function for SMP signing algorithm, signed data in little endian
- * order with tlen bits long */
-typedef void(tBTM_BLE_SIGN_CBACK)(void* p_ref_data, uint8_t* p_signing_data);
-typedef void(tBTM_BLE_VERIFY_CBACK)(void* p_ref_data, bool match);
-/* random address set complete callback */
-typedef void(tBTM_BLE_RANDOM_SET_CBACK)(BD_ADDR random_bda);
-
-typedef void(tBTM_BLE_SCAN_REQ_CBACK)(BD_ADDR remote_bda,
-                                      tBLE_ADDR_TYPE addr_type,
-                                      uint8_t adv_evt);
 typedef void (*tBLE_SCAN_PARAM_SETUP_CBACK)(tGATT_IF client_if,
                                             tBTM_STATUS status);
 

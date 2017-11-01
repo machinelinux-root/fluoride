@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016 The Android Open Source Project
+ * Copyright 2016 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,7 +23,9 @@
 #include "a2dp_codec_api.h"
 
 #include <base/logging.h>
+#include <inttypes.h>
 
+#include "a2dp_aac.h"
 #include "a2dp_sbc.h"
 #include "a2dp_vendor.h"
 #include "a2dp_vendor_aptx.h"
@@ -34,22 +36,37 @@
 /* The Media Type offset within the codec info byte array */
 #define A2DP_MEDIA_TYPE_OFFSET 1
 
+// Initializes the codec config.
+// |codec_config| is the codec config to initialize.
+// |codec_index| and |codec_priority| are the codec type and priority to use
+// for the initialization.
+static void init_btav_a2dp_codec_config(
+    btav_a2dp_codec_config_t* codec_config, btav_a2dp_codec_index_t codec_index,
+    btav_a2dp_codec_priority_t codec_priority) {
+  memset(codec_config, 0, sizeof(btav_a2dp_codec_config_t));
+  codec_config->codec_type = codec_index;
+  codec_config->codec_priority = codec_priority;
+}
+
 A2dpCodecConfig::A2dpCodecConfig(btav_a2dp_codec_index_t codec_index,
-                                 const std::string& name)
-    : codec_index_(codec_index), name_(name) {
-  setDefaultCodecPriority();
+                                 const std::string& name,
+                                 btav_a2dp_codec_priority_t codec_priority)
+    : codec_index_(codec_index),
+      name_(name),
+      default_codec_priority_(codec_priority) {
+  setCodecPriority(codec_priority);
 
-  memset(&codec_config_, 0, sizeof(codec_config_));
-  codec_config_.codec_type = codec_index_;
-
-  memset(&codec_capability_, 0, sizeof(codec_capability_));
-  codec_capability_.codec_type = codec_index_;
-
-  memset(&codec_user_config_, 0, sizeof(codec_user_config_));
-  codec_user_config_.codec_type = codec_index_;
-
-  memset(&codec_audio_config_, 0, sizeof(codec_audio_config_));
-  codec_audio_config_.codec_type = codec_index_;
+  init_btav_a2dp_codec_config(&codec_config_, codec_index_, codecPriority());
+  init_btav_a2dp_codec_config(&codec_capability_, codec_index_,
+                              codecPriority());
+  init_btav_a2dp_codec_config(&codec_local_capability_, codec_index_,
+                              codecPriority());
+  init_btav_a2dp_codec_config(&codec_selectable_capability_, codec_index_,
+                              codecPriority());
+  init_btav_a2dp_codec_config(&codec_user_config_, codec_index_,
+                              BTAV_A2DP_CODEC_PRIORITY_DEFAULT);
+  init_btav_a2dp_codec_config(&codec_audio_config_, codec_index_,
+                              BTAV_A2DP_CODEC_PRIORITY_DEFAULT);
 
   memset(ota_codec_config_, 0, sizeof(ota_codec_config_));
   memset(ota_codec_peer_capability_, 0, sizeof(ota_codec_peer_capability_));
@@ -60,7 +77,7 @@ A2dpCodecConfig::~A2dpCodecConfig() {}
 
 void A2dpCodecConfig::setCodecPriority(
     btav_a2dp_codec_priority_t codec_priority) {
-  if (codec_priority == 0) {
+  if (codec_priority == BTAV_A2DP_CODEC_PRIORITY_DEFAULT) {
     // Compute the default codec priority
     setDefaultCodecPriority();
   } else {
@@ -69,30 +86,42 @@ void A2dpCodecConfig::setCodecPriority(
 }
 
 void A2dpCodecConfig::setDefaultCodecPriority() {
-  // Compute the default codec priority
-  codec_priority_ = 1000 * codec_index_ + 1;
+  if (default_codec_priority_ != BTAV_A2DP_CODEC_PRIORITY_DEFAULT) {
+    codec_priority_ = default_codec_priority_;
+  } else {
+    // Compute the default codec priority
+    uint32_t priority = 1000 * (codec_index_ + 1) + 1;
+    codec_priority_ = static_cast<btav_a2dp_codec_priority_t>(priority);
+  }
 }
 
 A2dpCodecConfig* A2dpCodecConfig::createCodec(
-    btav_a2dp_codec_index_t codec_index) {
+    btav_a2dp_codec_index_t codec_index,
+    btav_a2dp_codec_priority_t codec_priority) {
   LOG_DEBUG(LOG_TAG, "%s: codec %s", __func__, A2DP_CodecIndexStr(codec_index));
 
   A2dpCodecConfig* codec_config = nullptr;
   switch (codec_index) {
     case BTAV_A2DP_CODEC_INDEX_SOURCE_SBC:
-      codec_config = new A2dpCodecConfigSbc();
+      codec_config = new A2dpCodecConfigSbc(codec_priority);
       break;
     case BTAV_A2DP_CODEC_INDEX_SINK_SBC:
-      codec_config = new A2dpCodecConfigSbcSink();
+      codec_config = new A2dpCodecConfigSbcSink(codec_priority);
+      break;
+    case BTAV_A2DP_CODEC_INDEX_SOURCE_AAC:
+      codec_config = new A2dpCodecConfigAac(codec_priority);
+      break;
+    case BTAV_A2DP_CODEC_INDEX_SINK_AAC:
+      codec_config = new A2dpCodecConfigAacSink(codec_priority);
       break;
     case BTAV_A2DP_CODEC_INDEX_SOURCE_APTX:
-      codec_config = new A2dpCodecConfigAptx();
+      codec_config = new A2dpCodecConfigAptx(codec_priority);
       break;
     case BTAV_A2DP_CODEC_INDEX_SOURCE_APTX_HD:
-      codec_config = new A2dpCodecConfigAptxHd();
+      codec_config = new A2dpCodecConfigAptxHd(codec_priority);
       break;
     case BTAV_A2DP_CODEC_INDEX_SOURCE_LDAC:
-      codec_config = new A2dpCodecConfigLdac();
+      codec_config = new A2dpCodecConfigLdac(codec_priority);
       break;
     // Add a switch statement for each vendor-specific codec
     case BTAV_A2DP_CODEC_INDEX_MAX:
@@ -137,6 +166,20 @@ btav_a2dp_codec_config_t A2dpCodecConfig::getCodecCapability() {
   return codec_capability_;
 }
 
+btav_a2dp_codec_config_t A2dpCodecConfig::getCodecLocalCapability() {
+  std::lock_guard<std::recursive_mutex> lock(codec_mutex_);
+
+  // TODO: We should check whether the codec capability is valid
+  return codec_local_capability_;
+}
+
+btav_a2dp_codec_config_t A2dpCodecConfig::getCodecSelectableCapability() {
+  std::lock_guard<std::recursive_mutex> lock(codec_mutex_);
+
+  // TODO: We should check whether the codec capability is valid
+  return codec_selectable_capability_;
+}
+
 btav_a2dp_codec_config_t A2dpCodecConfig::getCodecUserConfig() {
   std::lock_guard<std::recursive_mutex> lock(codec_mutex_);
 
@@ -168,7 +211,7 @@ uint8_t A2dpCodecConfig::getAudioBitsPerSample() {
 bool A2dpCodecConfig::isCodecConfigEmpty(
     const btav_a2dp_codec_config_t& codec_config) {
   return (
-      (codec_config.codec_priority == 0) &&
+      (codec_config.codec_priority == BTAV_A2DP_CODEC_PRIORITY_DEFAULT) &&
       (codec_config.sample_rate == BTAV_A2DP_CODEC_SAMPLE_RATE_NONE) &&
       (codec_config.bits_per_sample == BTAV_A2DP_CODEC_BITS_PER_SAMPLE_NONE) &&
       (codec_config.channel_mode == BTAV_A2DP_CODEC_CHANNEL_MODE_NONE) &&
@@ -243,6 +286,130 @@ bool A2dpCodecConfig::setCodecUserConfig(
   return true;
 }
 
+bool A2dpCodecConfig::codecConfigIsValid(
+    const btav_a2dp_codec_config_t& codec_config) {
+  return (codec_config.codec_type < BTAV_A2DP_CODEC_INDEX_MAX) &&
+         (codec_config.sample_rate != BTAV_A2DP_CODEC_SAMPLE_RATE_NONE) &&
+         (codec_config.bits_per_sample !=
+          BTAV_A2DP_CODEC_BITS_PER_SAMPLE_NONE) &&
+         (codec_config.channel_mode != BTAV_A2DP_CODEC_CHANNEL_MODE_NONE);
+}
+
+std::string A2dpCodecConfig::codecConfig2Str(
+    const btav_a2dp_codec_config_t& codec_config) {
+  std::string result;
+
+  if (!codecConfigIsValid(codec_config)) return "Invalid";
+
+  result.append("Rate=");
+  result.append(codecSampleRate2Str(codec_config.sample_rate));
+  result.append(" Bits=");
+  result.append(codecBitsPerSample2Str(codec_config.bits_per_sample));
+  result.append(" Mode=");
+  result.append(codecChannelMode2Str(codec_config.channel_mode));
+
+  return result;
+}
+
+std::string A2dpCodecConfig::codecSampleRate2Str(
+    btav_a2dp_codec_sample_rate_t codec_sample_rate) {
+  std::string result;
+
+  if (codec_sample_rate & BTAV_A2DP_CODEC_SAMPLE_RATE_44100) {
+    if (!result.empty()) result += "|";
+    result += "44100";
+  }
+  if (codec_sample_rate & BTAV_A2DP_CODEC_SAMPLE_RATE_48000) {
+    if (!result.empty()) result += "|";
+    result += "48000";
+  }
+  if (codec_sample_rate & BTAV_A2DP_CODEC_SAMPLE_RATE_88200) {
+    if (!result.empty()) result += "|";
+    result += "88200";
+  }
+  if (codec_sample_rate & BTAV_A2DP_CODEC_SAMPLE_RATE_96000) {
+    if (!result.empty()) result += "|";
+    result += "96000";
+  }
+  if (codec_sample_rate & BTAV_A2DP_CODEC_SAMPLE_RATE_176400) {
+    if (!result.empty()) result += "|";
+    result += "176400";
+  }
+  if (codec_sample_rate & BTAV_A2DP_CODEC_SAMPLE_RATE_192000) {
+    if (!result.empty()) result += "|";
+    result += "192000";
+  }
+  if (result.empty()) {
+    std::stringstream ss;
+    ss << "UnknownSampleRate(0x" << std::hex << codec_sample_rate << ")";
+    ss >> result;
+  }
+
+  return result;
+}
+
+std::string A2dpCodecConfig::codecBitsPerSample2Str(
+    btav_a2dp_codec_bits_per_sample_t codec_bits_per_sample) {
+  std::string result;
+
+  if (codec_bits_per_sample & BTAV_A2DP_CODEC_BITS_PER_SAMPLE_16) {
+    if (!result.empty()) result += "|";
+    result += "16";
+  }
+  if (codec_bits_per_sample & BTAV_A2DP_CODEC_BITS_PER_SAMPLE_24) {
+    if (!result.empty()) result += "|";
+    result += "24";
+  }
+  if (codec_bits_per_sample & BTAV_A2DP_CODEC_BITS_PER_SAMPLE_32) {
+    if (!result.empty()) result += "|";
+    result += "32";
+  }
+  if (result.empty()) {
+    std::stringstream ss;
+    ss << "UnknownBitsPerSample(0x" << std::hex << codec_bits_per_sample << ")";
+    ss >> result;
+  }
+
+  return result;
+}
+
+std::string A2dpCodecConfig::codecChannelMode2Str(
+    btav_a2dp_codec_channel_mode_t codec_channel_mode) {
+  std::string result;
+
+  if (codec_channel_mode & BTAV_A2DP_CODEC_CHANNEL_MODE_MONO) {
+    if (!result.empty()) result += "|";
+    result += "MONO";
+  }
+  if (codec_channel_mode & BTAV_A2DP_CODEC_CHANNEL_MODE_STEREO) {
+    if (!result.empty()) result += "|";
+    result += "STEREO";
+  }
+  if (result.empty()) {
+    std::stringstream ss;
+    ss << "UnknownChannelMode(0x" << std::hex << codec_channel_mode << ")";
+    ss >> result;
+  }
+
+  return result;
+}
+
+void A2dpCodecConfig::debug_codec_dump(int fd) {
+  std::string result;
+  dprintf(fd, "\nA2DP %s State:\n", name().c_str());
+  dprintf(fd, "  Priority: %d\n", codecPriority());
+  dprintf(fd, "  Encoder interval (ms): %" PRIu64 "\n", encoderIntervalMs());
+
+  result = codecConfig2Str(getCodecConfig());
+  dprintf(fd, "  Config: %s\n", result.c_str());
+
+  result = codecConfig2Str(getCodecSelectableCapability());
+  dprintf(fd, "  Selectable: %s\n", result.c_str());
+
+  result = codecConfig2Str(getCodecLocalCapability());
+  dprintf(fd, "  Local capability: %s\n", result.c_str());
+}
+
 //
 // Compares two codecs |lhs| and |rhs| based on their priority.
 // Returns true if |lhs| has higher priority (larger priority value).
@@ -256,11 +423,21 @@ static bool compare_codec_priority(const A2dpCodecConfig* lhs,
   return (lhs->codecIndex() > rhs->codecIndex());
 }
 
-A2dpCodecs::A2dpCodecs() : current_codec_config_(nullptr) {}
+A2dpCodecs::A2dpCodecs(
+    const std::vector<btav_a2dp_codec_config_t>& codec_priorities)
+    : current_codec_config_(nullptr) {
+  for (auto config : codec_priorities) {
+    codec_priorities_.insert(
+        std::make_pair(config.codec_type, config.codec_priority));
+  }
+}
 
 A2dpCodecs::~A2dpCodecs() {
   std::unique_lock<std::recursive_mutex> lock(codec_mutex_);
   for (const auto& iter : indexed_codecs_) {
+    delete iter.second;
+  }
+  for (const auto& iter : disabled_codecs_) {
     delete iter.second;
   }
   lock.unlock();
@@ -273,8 +450,29 @@ bool A2dpCodecs::init() {
   for (int i = BTAV_A2DP_CODEC_INDEX_MIN; i < BTAV_A2DP_CODEC_INDEX_MAX; i++) {
     btav_a2dp_codec_index_t codec_index =
         static_cast<btav_a2dp_codec_index_t>(i);
-    A2dpCodecConfig* codec_config = A2dpCodecConfig::createCodec(codec_index);
+
+    // Select the codec priority if explicitly configured
+    btav_a2dp_codec_priority_t codec_priority =
+        BTAV_A2DP_CODEC_PRIORITY_DEFAULT;
+    auto cp_iter = codec_priorities_.find(codec_index);
+    if (cp_iter != codec_priorities_.end()) {
+      codec_priority = cp_iter->second;
+    }
+
+    A2dpCodecConfig* codec_config =
+        A2dpCodecConfig::createCodec(codec_index, codec_priority);
     if (codec_config == nullptr) continue;
+
+    if (codec_priority != BTAV_A2DP_CODEC_PRIORITY_DEFAULT) {
+      LOG_INFO(LOG_TAG, "%s: updated %s codec priority to %d", __func__,
+               codec_config->name().c_str(), codec_priority);
+    }
+
+    // Test if the codec is disabled
+    if (codec_config->codecPriority() == BTAV_A2DP_CODEC_PRIORITY_DISABLED) {
+      disabled_codecs_.insert(std::make_pair(codec_index, codec_config));
+      continue;
+    }
 
     indexed_codecs_.insert(std::make_pair(codec_index, codec_config));
 
@@ -320,7 +518,8 @@ A2dpCodecConfig* A2dpCodecs::findSourceCodecConfig(
 
 bool A2dpCodecs::setCodecConfig(const uint8_t* p_peer_codec_info,
                                 bool is_capability,
-                                uint8_t* p_result_codec_config) {
+                                uint8_t* p_result_codec_config,
+                                bool select_current_codec) {
   std::lock_guard<std::recursive_mutex> lock(codec_mutex_);
   A2dpCodecConfig* a2dp_codec_config = findSourceCodecConfig(p_peer_codec_info);
   if (a2dp_codec_config == nullptr) return false;
@@ -328,7 +527,9 @@ bool A2dpCodecs::setCodecConfig(const uint8_t* p_peer_codec_info,
                                          p_result_codec_config)) {
     return false;
   }
-  current_codec_config_ = a2dp_codec_config;
+  if (select_current_codec) {
+    current_codec_config_ = a2dp_codec_config;
+  }
   return true;
 }
 
@@ -345,6 +546,23 @@ bool A2dpCodecs::setCodecUserConfig(
   *p_restart_output = false;
   *p_config_updated = false;
 
+  LOG_DEBUG(
+      LOG_TAG,
+      "%s: Configuring: codec_type=%d codec_priority=%d "
+      "sample_rate=0x%x bits_per_sample=0x%x "
+      "channel_mode=0x%x codec_specific_1=%" PRIi64
+      " "
+      "codec_specific_2=%" PRIi64
+      " "
+      "codec_specific_3=%" PRIi64
+      " "
+      "codec_specific_4=%" PRIi64,
+      __func__, codec_user_config.codec_type, codec_user_config.codec_priority,
+      codec_user_config.sample_rate, codec_user_config.bits_per_sample,
+      codec_user_config.channel_mode, codec_user_config.codec_specific_1,
+      codec_user_config.codec_specific_2, codec_user_config.codec_specific_3,
+      codec_user_config.codec_specific_4);
+
   if (codec_user_config.codec_type < BTAV_A2DP_CODEC_INDEX_MAX) {
     auto iter = indexed_codecs_.find(codec_user_config.codec_type);
     if (iter == indexed_codecs_.end()) goto fail;
@@ -354,7 +572,6 @@ bool A2dpCodecs::setCodecUserConfig(
     a2dp_codec_config = current_codec_config_;
   }
   if (a2dp_codec_config == nullptr) goto fail;
-  current_codec_config_ = a2dp_codec_config;
 
   // Reuse the existing codec audio config
   codec_audio_config = a2dp_codec_config->getCodecAudioConfig();
@@ -364,42 +581,67 @@ bool A2dpCodecs::setCodecUserConfig(
           p_restart_input, p_restart_output, p_config_updated)) {
     goto fail;
   }
-  CHECK(current_codec_config_ != nullptr);
 
-  // If the codec has changed because of priority, update the priorities
-  // and restart the connection
+  // Update the codec priorities, and eventually restart the connection
+  // if a new codec needs to be selected.
   do {
+    // Update the codec priority
     btav_a2dp_codec_priority_t old_priority =
         a2dp_codec_config->codecPriority();
     btav_a2dp_codec_priority_t new_priority = codec_user_config.codec_priority;
-    if (old_priority == new_priority) break;  // No change in priority
-    *p_config_updated = true;
     a2dp_codec_config->setCodecPriority(new_priority);
     // Get the actual (recomputed) priority
     new_priority = a2dp_codec_config->codecPriority();
-    if (old_priority > new_priority) {
-      // The priority has become lower. If this was the previous codec, restart
-      // the connection to re-elect a new codec.
-      if (a2dp_codec_config == last_codec_config) {
+
+    // Check if there was no previous codec
+    if (last_codec_config == nullptr) {
+      current_codec_config_ = a2dp_codec_config;
+      *p_restart_output = true;
+      break;
+    }
+
+    // Check if the priority of the current codec was updated
+    if (a2dp_codec_config == last_codec_config) {
+      if (old_priority == new_priority) break;  // No change in priority
+
+      *p_config_updated = true;
+      if (new_priority < old_priority) {
+        // The priority has become lower - restart the connection to
+        // select a new codec.
         *p_restart_output = true;
       }
       break;
     }
-    // The priority has become higher. If this was not the previous codec,
-    // and the new priority is higher than the current codec, restart the
-    // connection to re-elect a new codec.
-    if ((a2dp_codec_config == last_codec_config) ||
-        (last_codec_config == nullptr)) {
+
+    if (new_priority <= old_priority) {
+      // No change in priority, or the priority has become lower.
+      // This wasn't the current codec, so we shouldn't select a new codec.
+      if (*p_restart_input || *p_restart_output ||
+          (old_priority != new_priority)) {
+        *p_config_updated = true;
+      }
+      *p_restart_input = false;
+      *p_restart_output = false;
       break;
     }
-    if (new_priority < last_codec_config->codecPriority()) break;
-    last_codec_config->setDefaultCodecPriority();
-    *p_restart_output = true;
 
+    *p_config_updated = true;
+    if (new_priority >= last_codec_config->codecPriority()) {
+      // The new priority is higher than the current codec. Restart the
+      // connection to select a new codec.
+      current_codec_config_ = a2dp_codec_config;
+      last_codec_config->setDefaultCodecPriority();
+      *p_restart_output = true;
+    }
   } while (false);
   ordered_source_codecs_.sort(compare_codec_priority);
 
   if (*p_restart_input || *p_restart_output) *p_config_updated = true;
+
+  LOG_DEBUG(LOG_TAG,
+            "%s: Configured: restart_input = %d restart_output = %d "
+            "config_updated = %d",
+            __func__, *p_restart_input, *p_restart_output, *p_config_updated);
 
   return true;
 
@@ -518,7 +760,8 @@ fail:
 
 bool A2dpCodecs::getCodecConfigAndCapabilities(
     btav_a2dp_codec_config_t* p_codec_config,
-    std::vector<btav_a2dp_codec_config_t>* p_codec_capabilities) {
+    std::vector<btav_a2dp_codec_config_t>* p_codecs_local_capabilities,
+    std::vector<btav_a2dp_codec_config_t>* p_codecs_selectable_capabilities) {
   std::lock_guard<std::recursive_mutex> lock(codec_mutex_);
 
   if (current_codec_config_ != nullptr) {
@@ -529,13 +772,45 @@ bool A2dpCodecs::getCodecConfigAndCapabilities(
     *p_codec_config = codec_config;
   }
 
-  std::vector<btav_a2dp_codec_config_t> codec_capabilities;
+  std::vector<btav_a2dp_codec_config_t> codecs_capabilities;
   for (auto codec : orderedSourceCodecs()) {
-    codec_capabilities.push_back(codec->getCodecCapability());
+    codecs_capabilities.push_back(codec->getCodecLocalCapability());
   }
-  *p_codec_capabilities = codec_capabilities;
+  *p_codecs_local_capabilities = codecs_capabilities;
+
+  codecs_capabilities.clear();
+  for (auto codec : orderedSourceCodecs()) {
+    btav_a2dp_codec_config_t codec_capability =
+        codec->getCodecSelectableCapability();
+    // Don't add entries that cannot be used
+    if ((codec_capability.sample_rate == BTAV_A2DP_CODEC_SAMPLE_RATE_NONE) ||
+        (codec_capability.bits_per_sample ==
+         BTAV_A2DP_CODEC_BITS_PER_SAMPLE_NONE) ||
+        (codec_capability.channel_mode == BTAV_A2DP_CODEC_CHANNEL_MODE_NONE)) {
+      continue;
+    }
+    codecs_capabilities.push_back(codec_capability);
+  }
+  *p_codecs_selectable_capabilities = codecs_capabilities;
 
   return true;
+}
+
+void A2dpCodecs::debug_codec_dump(int fd) {
+  std::lock_guard<std::recursive_mutex> lock(codec_mutex_);
+  dprintf(fd, "\nA2DP Codecs State:\n");
+
+  // Print the current codec name
+  if (current_codec_config_ != nullptr) {
+    dprintf(fd, "  Current Codec: %s\n", current_codec_config_->name().c_str());
+  } else {
+    dprintf(fd, "  Current Codec: None\n");
+  }
+
+  // Print the codec-specific state
+  for (auto codec_config : ordered_source_codecs_) {
+    codec_config->debug_codec_dump(fd);
+  }
 }
 
 tA2DP_CODEC_TYPE A2DP_GetCodecType(const uint8_t* p_codec_info) {
@@ -550,6 +825,8 @@ bool A2DP_IsSourceCodecValid(const uint8_t* p_codec_info) {
   switch (codec_type) {
     case A2DP_MEDIA_CT_SBC:
       return A2DP_IsSourceCodecValidSbc(p_codec_info);
+    case A2DP_MEDIA_CT_AAC:
+      return A2DP_IsSourceCodecValidAac(p_codec_info);
     case A2DP_MEDIA_CT_NON_A2DP:
       return A2DP_IsVendorSourceCodecValid(p_codec_info);
     default:
@@ -567,6 +844,8 @@ bool A2DP_IsSinkCodecValid(const uint8_t* p_codec_info) {
   switch (codec_type) {
     case A2DP_MEDIA_CT_SBC:
       return A2DP_IsSinkCodecValidSbc(p_codec_info);
+    case A2DP_MEDIA_CT_AAC:
+      return A2DP_IsSinkCodecValidAac(p_codec_info);
     case A2DP_MEDIA_CT_NON_A2DP:
       return A2DP_IsVendorSinkCodecValid(p_codec_info);
     default:
@@ -584,6 +863,8 @@ bool A2DP_IsPeerSourceCodecValid(const uint8_t* p_codec_info) {
   switch (codec_type) {
     case A2DP_MEDIA_CT_SBC:
       return A2DP_IsPeerSourceCodecValidSbc(p_codec_info);
+    case A2DP_MEDIA_CT_AAC:
+      return A2DP_IsPeerSourceCodecValidAac(p_codec_info);
     case A2DP_MEDIA_CT_NON_A2DP:
       return A2DP_IsVendorPeerSourceCodecValid(p_codec_info);
     default:
@@ -601,6 +882,8 @@ bool A2DP_IsPeerSinkCodecValid(const uint8_t* p_codec_info) {
   switch (codec_type) {
     case A2DP_MEDIA_CT_SBC:
       return A2DP_IsPeerSinkCodecValidSbc(p_codec_info);
+    case A2DP_MEDIA_CT_AAC:
+      return A2DP_IsPeerSinkCodecValidAac(p_codec_info);
     case A2DP_MEDIA_CT_NON_A2DP:
       return A2DP_IsVendorPeerSinkCodecValid(p_codec_info);
     default:
@@ -618,6 +901,8 @@ bool A2DP_IsSinkCodecSupported(const uint8_t* p_codec_info) {
   switch (codec_type) {
     case A2DP_MEDIA_CT_SBC:
       return A2DP_IsSinkCodecSupportedSbc(p_codec_info);
+    case A2DP_MEDIA_CT_AAC:
+      return A2DP_IsSinkCodecSupportedAac(p_codec_info);
     case A2DP_MEDIA_CT_NON_A2DP:
       return A2DP_IsVendorSinkCodecSupported(p_codec_info);
     default:
@@ -636,6 +921,8 @@ bool A2DP_IsPeerSourceCodecSupported(const uint8_t* p_codec_info) {
   switch (codec_type) {
     case A2DP_MEDIA_CT_SBC:
       return A2DP_IsPeerSourceCodecSupportedSbc(p_codec_info);
+    case A2DP_MEDIA_CT_AAC:
+      return A2DP_IsPeerSourceCodecSupportedAac(p_codec_info);
     case A2DP_MEDIA_CT_NON_A2DP:
       return A2DP_IsVendorPeerSourceCodecSupported(p_codec_info);
     default:
@@ -659,6 +946,8 @@ tA2DP_STATUS A2DP_BuildSrc2SinkConfig(const uint8_t* p_src_cap,
   switch (codec_type) {
     case A2DP_MEDIA_CT_SBC:
       return A2DP_BuildSrc2SinkConfigSbc(p_src_cap, p_pref_cfg);
+    case A2DP_MEDIA_CT_AAC:
+      return A2DP_BuildSrc2SinkConfigAac(p_src_cap, p_pref_cfg);
     case A2DP_MEDIA_CT_NON_A2DP:
       return A2DP_VendorBuildSrc2SinkConfig(p_src_cap, p_pref_cfg);
     default:
@@ -691,6 +980,8 @@ const char* A2DP_CodecName(const uint8_t* p_codec_info) {
   switch (codec_type) {
     case A2DP_MEDIA_CT_SBC:
       return A2DP_CodecNameSbc(p_codec_info);
+    case A2DP_MEDIA_CT_AAC:
+      return A2DP_CodecNameAac(p_codec_info);
     case A2DP_MEDIA_CT_NON_A2DP:
       return A2DP_VendorCodecName(p_codec_info);
     default:
@@ -711,6 +1002,8 @@ bool A2DP_CodecTypeEquals(const uint8_t* p_codec_info_a,
   switch (codec_type_a) {
     case A2DP_MEDIA_CT_SBC:
       return A2DP_CodecTypeEqualsSbc(p_codec_info_a, p_codec_info_b);
+    case A2DP_MEDIA_CT_AAC:
+      return A2DP_CodecTypeEqualsAac(p_codec_info_a, p_codec_info_b);
     case A2DP_MEDIA_CT_NON_A2DP:
       return A2DP_VendorCodecTypeEquals(p_codec_info_a, p_codec_info_b);
     default:
@@ -731,6 +1024,8 @@ bool A2DP_CodecEquals(const uint8_t* p_codec_info_a,
   switch (codec_type_a) {
     case A2DP_MEDIA_CT_SBC:
       return A2DP_CodecEqualsSbc(p_codec_info_a, p_codec_info_b);
+    case A2DP_MEDIA_CT_AAC:
+      return A2DP_CodecEqualsAac(p_codec_info_a, p_codec_info_b);
     case A2DP_MEDIA_CT_NON_A2DP:
       return A2DP_VendorCodecEquals(p_codec_info_a, p_codec_info_b);
     default:
@@ -749,26 +1044,10 @@ int A2DP_GetTrackSampleRate(const uint8_t* p_codec_info) {
   switch (codec_type) {
     case A2DP_MEDIA_CT_SBC:
       return A2DP_GetTrackSampleRateSbc(p_codec_info);
+    case A2DP_MEDIA_CT_AAC:
+      return A2DP_GetTrackSampleRateAac(p_codec_info);
     case A2DP_MEDIA_CT_NON_A2DP:
       return A2DP_VendorGetTrackSampleRate(p_codec_info);
-    default:
-      break;
-  }
-
-  LOG_ERROR(LOG_TAG, "%s: unsupported codec type 0x%x", __func__, codec_type);
-  return -1;
-}
-
-int A2DP_GetTrackBitsPerSample(const uint8_t* p_codec_info) {
-  tA2DP_CODEC_TYPE codec_type = A2DP_GetCodecType(p_codec_info);
-
-  LOG_VERBOSE(LOG_TAG, "%s: codec_type = 0x%x", __func__, codec_type);
-
-  switch (codec_type) {
-    case A2DP_MEDIA_CT_SBC:
-      return A2DP_GetTrackBitsPerSampleSbc(p_codec_info);
-    case A2DP_MEDIA_CT_NON_A2DP:
-      return A2DP_VendorGetTrackBitsPerSample(p_codec_info);
     default:
       break;
   }
@@ -785,6 +1064,8 @@ int A2DP_GetTrackChannelCount(const uint8_t* p_codec_info) {
   switch (codec_type) {
     case A2DP_MEDIA_CT_SBC:
       return A2DP_GetTrackChannelCountSbc(p_codec_info);
+    case A2DP_MEDIA_CT_AAC:
+      return A2DP_GetTrackChannelCountAac(p_codec_info);
     case A2DP_MEDIA_CT_NON_A2DP:
       return A2DP_VendorGetTrackChannelCount(p_codec_info);
     default:
@@ -803,29 +1084,10 @@ int A2DP_GetSinkTrackChannelType(const uint8_t* p_codec_info) {
   switch (codec_type) {
     case A2DP_MEDIA_CT_SBC:
       return A2DP_GetSinkTrackChannelTypeSbc(p_codec_info);
+    case A2DP_MEDIA_CT_AAC:
+      return A2DP_GetSinkTrackChannelTypeAac(p_codec_info);
     case A2DP_MEDIA_CT_NON_A2DP:
       return A2DP_VendorGetSinkTrackChannelType(p_codec_info);
-    default:
-      break;
-  }
-
-  LOG_ERROR(LOG_TAG, "%s: unsupported codec type 0x%x", __func__, codec_type);
-  return -1;
-}
-
-int A2DP_GetSinkFramesCountToProcess(uint64_t time_interval_ms,
-                                     const uint8_t* p_codec_info) {
-  tA2DP_CODEC_TYPE codec_type = A2DP_GetCodecType(p_codec_info);
-
-  LOG_VERBOSE(LOG_TAG, "%s: codec_type = 0x%x", __func__, codec_type);
-
-  switch (codec_type) {
-    case A2DP_MEDIA_CT_SBC:
-      return A2DP_GetSinkFramesCountToProcessSbc(time_interval_ms,
-                                                 p_codec_info);
-    case A2DP_MEDIA_CT_NON_A2DP:
-      return A2DP_VendorGetSinkFramesCountToProcess(time_interval_ms,
-                                                    p_codec_info);
     default:
       break;
   }
@@ -841,6 +1103,8 @@ bool A2DP_GetPacketTimestamp(const uint8_t* p_codec_info, const uint8_t* p_data,
   switch (codec_type) {
     case A2DP_MEDIA_CT_SBC:
       return A2DP_GetPacketTimestampSbc(p_codec_info, p_data, p_timestamp);
+    case A2DP_MEDIA_CT_AAC:
+      return A2DP_GetPacketTimestampAac(p_codec_info, p_data, p_timestamp);
     case A2DP_MEDIA_CT_NON_A2DP:
       return A2DP_VendorGetPacketTimestamp(p_codec_info, p_data, p_timestamp);
     default:
@@ -858,6 +1122,8 @@ bool A2DP_BuildCodecHeader(const uint8_t* p_codec_info, BT_HDR* p_buf,
   switch (codec_type) {
     case A2DP_MEDIA_CT_SBC:
       return A2DP_BuildCodecHeaderSbc(p_codec_info, p_buf, frames_per_packet);
+    case A2DP_MEDIA_CT_AAC:
+      return A2DP_BuildCodecHeaderAac(p_codec_info, p_buf, frames_per_packet);
     case A2DP_MEDIA_CT_NON_A2DP:
       return A2DP_VendorBuildCodecHeader(p_codec_info, p_buf,
                                          frames_per_packet);
@@ -878,8 +1144,31 @@ const tA2DP_ENCODER_INTERFACE* A2DP_GetEncoderInterface(
   switch (codec_type) {
     case A2DP_MEDIA_CT_SBC:
       return A2DP_GetEncoderInterfaceSbc(p_codec_info);
+    case A2DP_MEDIA_CT_AAC:
+      return A2DP_GetEncoderInterfaceAac(p_codec_info);
     case A2DP_MEDIA_CT_NON_A2DP:
       return A2DP_VendorGetEncoderInterface(p_codec_info);
+    default:
+      break;
+  }
+
+  LOG_ERROR(LOG_TAG, "%s: unsupported codec type 0x%x", __func__, codec_type);
+  return NULL;
+}
+
+const tA2DP_DECODER_INTERFACE* A2DP_GetDecoderInterface(
+    const uint8_t* p_codec_info) {
+  tA2DP_CODEC_TYPE codec_type = A2DP_GetCodecType(p_codec_info);
+
+  LOG_VERBOSE(LOG_TAG, "%s: codec_type = 0x%x", __func__, codec_type);
+
+  switch (codec_type) {
+    case A2DP_MEDIA_CT_SBC:
+      return A2DP_GetDecoderInterfaceSbc(p_codec_info);
+    case A2DP_MEDIA_CT_AAC:
+      return A2DP_GetDecoderInterfaceAac(p_codec_info);
+    case A2DP_MEDIA_CT_NON_A2DP:
+      return A2DP_VendorGetDecoderInterface(p_codec_info);
     default:
       break;
   }
@@ -894,6 +1183,8 @@ bool A2DP_AdjustCodec(uint8_t* p_codec_info) {
   switch (codec_type) {
     case A2DP_MEDIA_CT_SBC:
       return A2DP_AdjustCodecSbc(p_codec_info);
+    case A2DP_MEDIA_CT_AAC:
+      return A2DP_AdjustCodecAac(p_codec_info);
     case A2DP_MEDIA_CT_NON_A2DP:
       return A2DP_VendorAdjustCodec(p_codec_info);
     default:
@@ -912,6 +1203,8 @@ btav_a2dp_codec_index_t A2DP_SourceCodecIndex(const uint8_t* p_codec_info) {
   switch (codec_type) {
     case A2DP_MEDIA_CT_SBC:
       return A2DP_SourceCodecIndexSbc(p_codec_info);
+    case A2DP_MEDIA_CT_AAC:
+      return A2DP_SourceCodecIndexAac(p_codec_info);
     case A2DP_MEDIA_CT_NON_A2DP:
       return A2DP_VendorSourceCodecIndex(p_codec_info);
     default:
@@ -928,6 +1221,10 @@ const char* A2DP_CodecIndexStr(btav_a2dp_codec_index_t codec_index) {
       return A2DP_CodecIndexStrSbc();
     case BTAV_A2DP_CODEC_INDEX_SINK_SBC:
       return A2DP_CodecIndexStrSbcSink();
+    case BTAV_A2DP_CODEC_INDEX_SOURCE_AAC:
+      return A2DP_CodecIndexStrAac();
+    case BTAV_A2DP_CODEC_INDEX_SINK_AAC:
+      return A2DP_CodecIndexStrAacSink();
     default:
       break;
   }
@@ -952,6 +1249,10 @@ bool A2DP_InitCodecConfig(btav_a2dp_codec_index_t codec_index,
       return A2DP_InitCodecConfigSbc(p_cfg);
     case BTAV_A2DP_CODEC_INDEX_SINK_SBC:
       return A2DP_InitCodecConfigSbcSink(p_cfg);
+    case BTAV_A2DP_CODEC_INDEX_SOURCE_AAC:
+      return A2DP_InitCodecConfigAac(p_cfg);
+    case BTAV_A2DP_CODEC_INDEX_SINK_AAC:
+      return A2DP_InitCodecConfigAacSink(p_cfg);
     default:
       break;
   }
@@ -959,5 +1260,25 @@ bool A2DP_InitCodecConfig(btav_a2dp_codec_index_t codec_index,
   if (codec_index < BTAV_A2DP_CODEC_INDEX_MAX)
     return A2DP_VendorInitCodecConfig(codec_index, p_cfg);
 
+  return false;
+}
+
+bool A2DP_DumpCodecInfo(const uint8_t* p_codec_info) {
+  tA2DP_CODEC_TYPE codec_type = A2DP_GetCodecType(p_codec_info);
+
+  LOG_VERBOSE(LOG_TAG, "%s: codec_type = 0x%x", __func__, codec_type);
+
+  switch (codec_type) {
+    case A2DP_MEDIA_CT_SBC:
+      return A2DP_DumpCodecInfoSbc(p_codec_info);
+    case A2DP_MEDIA_CT_AAC:
+      return A2DP_DumpCodecInfoAac(p_codec_info);
+    case A2DP_MEDIA_CT_NON_A2DP:
+      return A2DP_VendorDumpCodecInfo(p_codec_info);
+    default:
+      break;
+  }
+
+  LOG_ERROR(LOG_TAG, "%s: unsupported codec type 0x%x", __func__, codec_type);
   return false;
 }

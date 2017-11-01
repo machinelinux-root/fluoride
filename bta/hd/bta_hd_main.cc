@@ -1,7 +1,7 @@
 /******************************************************************************
  *
- *  Copyright (C) 2016 The Android Open Source Project
- *  Copyright (C) 2005-2012 Broadcom Corporation
+ *  Copyright 2016 The Android Open Source Project
+ *  Copyright 2005-2012 Broadcom Corporation
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -122,14 +122,14 @@ const uint8_t bta_hd_st_idle[][BTA_HD_NUM_COLS] = {
     /* BTA_HD_API_REGISTER_APP_EVT   */ {BTA_HD_IGNORE, BTA_HD_IDLE_ST},
     /* BTA_HD_API_UNREGISTER_APP_EVT */ {BTA_HD_UNREGISTER_ACT, BTA_HD_INIT_ST},
     /* BTA_HD_API_CONNECT_EVT        */ {BTA_HD_CONNECT_ACT, BTA_HD_IDLE_ST},
-    /* BTA_HD_API_DISCONNECT_EVT     */ {BTA_HD_IGNORE, BTA_HD_IDLE_ST},
+    /* BTA_HD_API_DISCONNECT_EVT     */ {BTA_HD_DISCONNECT_ACT, BTA_HD_IDLE_ST},
     /* BTA_HD_API_ADD_DEVICE_EVT     */ {BTA_HD_ADD_DEVICE_ACT, BTA_HD_IDLE_ST},
     /* BTA_HD_API_REMOVE_DEVICE_EVT  */ {BTA_HD_REMOVE_DEVICE_ACT, BTA_HD_IDLE_ST},
     /* BTA_HD_API_SEND_REPORT_EVT    */ {BTA_HD_SEND_REPORT_ACT, BTA_HD_IDLE_ST},
     /* BTA_HD_API_REPORT_ERROR_EVT   */ {BTA_HD_IGNORE, BTA_HD_IDLE_ST},
     /* BTA_HD_API_VC_UNPLUG_EVT      */ {BTA_HD_IGNORE, BTA_HD_IDLE_ST},
     /* BTA_HD_INT_OPEN_EVT           */ {BTA_HD_OPEN_ACT, BTA_HD_CONN_ST},
-    /* BTA_HD_INT_CLOSE_EVT          */ {BTA_HD_IGNORE, BTA_HD_IDLE_ST},
+    /* BTA_HD_INT_CLOSE_EVT          */ {BTA_HD_CLOSE_ACT, BTA_HD_IDLE_ST},
     /* BTA_HD_INT_INTR_DATA_EVT      */ {BTA_HD_IGNORE, BTA_HD_IDLE_ST},
     /* BTA_HD_INT_GET_REPORT_EVT     */ {BTA_HD_IGNORE, BTA_HD_IDLE_ST},
     /* BTA_HD_INT_SET_REPORT_EVT     */ {BTA_HD_IGNORE, BTA_HD_IDLE_ST},
@@ -219,9 +219,7 @@ const tBTA_HD_ST_TBL bta_hd_st_tbl[] = {bta_hd_st_init, bta_hd_st_idle,
 /*****************************************************************************
  * Global data
  ****************************************************************************/
-#if BTA_DYNAMIC_MEMORY == FALSE
 tBTA_HD_CB bta_hd_cb;
-#endif
 
 static const char* bta_hd_evt_code(tBTA_HD_INT_EVT evt_code);
 static const char* bta_hd_state_code(tBTA_HD_STATE state_code);
@@ -253,7 +251,8 @@ void bta_hd_sm_execute(uint16_t event, tBTA_HD_DATA* p_data) {
 
   event &= 0xff;
 
-  if ((action = state_table[event][BTA_HD_ACTION]) < BTA_HD_IGNORE) {
+  action = state_table[event][BTA_HD_ACTION];
+  if (action < BTA_HD_IGNORE) {
     (*bta_hd_action[action])(p_data);
   }
 
