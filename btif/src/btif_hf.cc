@@ -254,6 +254,26 @@ static void send_indicator_update(uint16_t indicator, uint16_t value) {
   BTA_AgResult(BTA_AG_HANDLE_ALL, BTA_AG_IND_RES, &ag_res);
 }
 
+/*******************************************************************************
+ *
+ * Function         send_call_status_forcibly
+ *
+ * Description      Send call status
+ *
+ * Returns          void
+ *
+ *******************************************************************************/
+static void send_call_status_forcibly(uint16_t value) {
+  tBTA_AG_RES_DATA ag_res;
+
+  memset(&ag_res, 0, sizeof(tBTA_AG_RES_DATA));
+
+  ag_res.ind.id = BTA_AG_IND_CALL;
+  ag_res.ind.value = value;
+
+  BTA_AgResult(BTA_AG_HANDLE_ALL, BTA_AG_IND_RES_ON_DEMAND, &ag_res);
+}
+
 void clear_phone_state_multihf(int idx) {
   btif_hf_cb[idx].call_setup_state = BTHF_CALL_STATE_IDLE;
   btif_hf_cb[idx].num_active = btif_hf_cb[idx].num_held = 0;
@@ -1052,33 +1072,6 @@ static bt_status_t cind_response(int svc, int num_active, int num_held,
   return BT_STATUS_FAIL;
 }
 
-/*******************************************************************************
- *
- * Function         bind_response
- *
- * Description      Send +BIND response
- *
- * Returns          bt_status_t
- *
- ******************************************************************************/
-static bt_status_t bind_response(bthf_hf_ind_type_t ind_id,
-                                 bthf_hf_ind_status_t ind_status,
-                                 RawAddress* bd_addr) {
-  CHECK_BTHF_INIT();
-
-  int index = btif_hf_idx_by_bdaddr(bd_addr);
-  if (!is_connected(bd_addr) || index == BTIF_HF_INVALID_IDX)
-    return BT_STATUS_FAIL;
-
-  tBTA_AG_RES_DATA ag_res;
-  memset(&ag_res, 0, sizeof(ag_res));
-  ag_res.ind.id = ind_id;
-  ag_res.ind.on_demand = (ind_status == BTHF_HF_IND_ENABLED);
-
-  BTA_AgResult(btif_hf_cb[index].handle, BTA_AG_BIND_RES, &ag_res);
-  return BT_STATUS_SUCCESS;
-}
-
 static bt_status_t set_sco_allowed(bool value) {
   CHECK_BTHF_INIT();
 
@@ -1427,6 +1420,17 @@ static bt_status_t phone_state_change(int num_active, int num_held,
     send_indicator_update(BTA_AG_IND_CALLHELD, 1);
   }
 
+  /* When call is hung up and still there is another call is in active,
+   * some of the HF cannot acquire the call states by its own. If HF try
+   * to terminate a call, it may not send the command AT+CHUP because the
+   * call states are not updated properly. HF should get informed the call
+   * status forcibly.
+   */
+  if ((btif_hf_cb[idx].num_active == num_active && num_active != 0) &&
+      (btif_hf_cb[idx].num_held != num_held && num_held == 0)) {
+    send_call_status_forcibly((uint16_t)num_active);
+  }
+
 update_call_states:
   for (i = 0; i < btif_max_hf_clients; i++) {
     if (btif_hf_cb[i].state == BTHF_CONNECTION_STATE_SLC_CONNECTED) {
@@ -1504,39 +1508,6 @@ static void cleanup(void) {
   }
 }
 
-/*******************************************************************************
- *
- * Function         configure_wbs
- *
- * Description      set to over-ride the current WBS configuration.
- *                  It will not send codec setting cmd to the controller now.
- *                  It just change the configure.
- *
- * Returns          bt_status_t
- *
- ******************************************************************************/
-static bt_status_t configure_wbs(RawAddress* bd_addr,
-                                 bthf_wbs_config_t config) {
-  CHECK_BTHF_INIT();
-
-  int idx = btif_hf_idx_by_bdaddr(bd_addr);
-
-  if ((idx < 0) || (idx >= BTIF_HF_NUM_CB)) {
-    BTIF_TRACE_ERROR("%s: Invalid index %d", __func__, idx);
-    return BT_STATUS_FAIL;
-  }
-
-  BTIF_TRACE_EVENT("%s config is %d", __func__, config);
-  if (config == BTHF_WBS_YES)
-    BTA_AgSetCodec(btif_hf_cb[idx].handle, BTA_AG_CODEC_MSBC);
-  else if (config == BTHF_WBS_NO)
-    BTA_AgSetCodec(btif_hf_cb[idx].handle, BTA_AG_CODEC_CVSD);
-  else
-    BTA_AgSetCodec(btif_hf_cb[idx].handle, BTA_AG_CODEC_NONE);
-
-  return BT_STATUS_SUCCESS;
-}
-
 static const bthf_interface_t bthfInterface = {
     sizeof(bthfInterface),
     init,
@@ -1555,8 +1526,6 @@ static const bthf_interface_t bthfInterface = {
     clcc_response,
     phone_state_change,
     cleanup,
-    configure_wbs,
-    bind_response,
     set_sco_allowed,
 };
 

@@ -366,12 +366,12 @@ uint8_t bta_av_rc_create(tBTA_AV_CB* p_cb, uint8_t role, uint8_t shdl,
  *
  * Description      Check if it is Group Navigation Msg for Metadata
  *
- * Returns          BTA_AV_RSP_ACCEPT or BTA_AV_RSP_NOT_IMPL.
+ * Returns          AVRC_RSP_ACCEPT or AVRC_RSP_NOT_IMPL
  *
  ******************************************************************************/
 static tBTA_AV_CODE bta_av_group_navi_supported(uint8_t len, uint8_t* p_data,
                                                 bool is_inquiry) {
-  tBTA_AV_CODE ret = BTA_AV_RSP_NOT_IMPL;
+  tBTA_AV_CODE ret = AVRC_RSP_NOT_IMPL;
   uint8_t* p_ptr = p_data;
   uint16_t u16;
   uint32_t u32;
@@ -382,12 +382,12 @@ static tBTA_AV_CODE bta_av_group_navi_supported(uint8_t len, uint8_t* p_data,
 
     if (u32 == AVRC_CO_METADATA) {
       if (is_inquiry) {
-        if (u16 <= AVRC_PDU_PREV_GROUP) ret = BTA_AV_RSP_IMPL_STBL;
+        if (u16 <= AVRC_PDU_PREV_GROUP) ret = AVRC_RSP_IMPL_STBL;
       } else {
         if (u16 <= AVRC_PDU_PREV_GROUP)
-          ret = BTA_AV_RSP_ACCEPT;
+          ret = AVRC_RSP_ACCEPT;
         else
-          ret = BTA_AV_RSP_REJ;
+          ret = AVRC_RSP_REJ;
       }
     }
   }
@@ -401,24 +401,24 @@ static tBTA_AV_CODE bta_av_group_navi_supported(uint8_t len, uint8_t* p_data,
  *
  * Description      Check if remote control operation is supported.
  *
- * Returns          BTA_AV_RSP_ACCEPT of supported, BTA_AV_RSP_NOT_IMPL if not.
+ * Returns          AVRC_RSP_ACCEPT of supported, AVRC_RSP_NOT_IMPL if not.
  *
  ******************************************************************************/
 static tBTA_AV_CODE bta_av_op_supported(tBTA_AV_RC rc_id, bool is_inquiry) {
-  tBTA_AV_CODE ret_code = BTA_AV_RSP_NOT_IMPL;
+  tBTA_AV_CODE ret_code = AVRC_RSP_NOT_IMPL;
 
   if (p_bta_av_rc_id) {
     if (is_inquiry) {
       if (p_bta_av_rc_id[rc_id >> 4] & (1 << (rc_id & 0x0F))) {
-        ret_code = BTA_AV_RSP_IMPL_STBL;
+        ret_code = AVRC_RSP_IMPL_STBL;
       }
     } else {
       if (p_bta_av_rc_id[rc_id >> 4] & (1 << (rc_id & 0x0F))) {
-        ret_code = BTA_AV_RSP_ACCEPT;
-      } else if ((p_bta_av_cfg->rc_pass_rsp == BTA_AV_RSP_INTERIM) &&
+        ret_code = AVRC_RSP_ACCEPT;
+      } else if ((p_bta_av_cfg->rc_pass_rsp == AVRC_RSP_INTERIM) &&
                  p_bta_av_rc_id_ac) {
         if (p_bta_av_rc_id_ac[rc_id >> 4] & (1 << (rc_id & 0x0F))) {
-          ret_code = BTA_AV_RSP_INTERIM;
+          ret_code = AVRC_RSP_INTERIM;
         }
       }
     }
@@ -743,7 +743,6 @@ tBTA_AV_EVT bta_av_proc_meta_cmd(tAVRC_RESPONSE* p_rc_rsp,
   uint16_t u16;
   tAVRC_MSG_VENDOR* p_vendor = &p_msg->msg.vendor;
 
-#if (AVRC_METADATA_INCLUDED == TRUE)
   pdu = *(p_vendor->p_vendor_data);
   p_rc_rsp->pdu = pdu;
   *p_ctype = AVRC_RSP_REJ;
@@ -762,7 +761,7 @@ tBTA_AV_EVT bta_av_proc_meta_cmd(tAVRC_RESPONSE* p_rc_rsp,
     APPL_TRACE_DEBUG("SUBUNIT must be PANEL");
     /* reject it */
     evt = 0;
-    p_vendor->hdr.ctype = BTA_AV_RSP_NOT_IMPL;
+    p_vendor->hdr.ctype = AVRC_RSP_NOT_IMPL;
     p_vendor->vendor_len = 0;
     p_rc_rsp->rsp.status = AVRC_STS_BAD_PARAM;
   } else if (!AVRC_IsValidAvcType(pdu, p_vendor->hdr.ctype)) {
@@ -809,12 +808,6 @@ tBTA_AV_EVT bta_av_proc_meta_cmd(tAVRC_RESPONSE* p_rc_rsp,
         break;
     }
   }
-#else
-  APPL_TRACE_DEBUG("AVRCP 1.3 Metadata not supporteed. Reject command.");
-  /* reject invalid message without reporting to app */
-  evt = 0;
-  p_rc_rsp->rsp.status = AVRC_STS_BAD_CMD;
-#endif
 
   return evt;
 }
@@ -835,12 +828,10 @@ void bta_av_rc_msg(tBTA_AV_CB* p_cb, tBTA_AV_DATA* p_data) {
   tAVRC_MSG_VENDOR* p_vendor = &p_data->rc_msg.msg.vendor;
   bool is_inquiry = ((p_data->rc_msg.msg.hdr.ctype == AVRC_CMD_SPEC_INQ) ||
                      p_data->rc_msg.msg.hdr.ctype == AVRC_CMD_GEN_INQ);
-#if (AVRC_METADATA_INCLUDED == TRUE)
   uint8_t ctype = 0;
   tAVRC_RESPONSE rc_rsp;
 
   rc_rsp.rsp.status = BTA_AV_STS_NO_RSP;
-#endif
 
   if (NULL == p_data) {
     APPL_TRACE_ERROR("Message from peer with no data in %s", __func__);
@@ -860,17 +851,15 @@ void bta_av_rc_msg(tBTA_AV_CB* p_cb, tBTA_AV_DATA* p_data) {
       osi_property_get("bluetooth.pts.avrcp_ct.support", avrcp_ct_support,
                        "false");
       if (p_data->rc_msg.msg.pass.op_id == AVRC_ID_VENDOR) {
-        p_data->rc_msg.msg.hdr.ctype = BTA_AV_RSP_NOT_IMPL;
-#if (AVRC_METADATA_INCLUDED == TRUE)
+        p_data->rc_msg.msg.hdr.ctype = AVRC_RSP_NOT_IMPL;
         if (p_cb->features & BTA_AV_FEAT_METADATA)
           p_data->rc_msg.msg.hdr.ctype = bta_av_group_navi_supported(
               p_data->rc_msg.msg.pass.pass_len,
               p_data->rc_msg.msg.pass.p_pass_data, is_inquiry);
-#endif
       } else if (((p_data->rc_msg.msg.pass.op_id == AVRC_ID_VOL_UP) ||
                   (p_data->rc_msg.msg.pass.op_id == AVRC_ID_VOL_DOWN)) &&
                  !strcmp(avrcp_ct_support, "true")) {
-        p_data->rc_msg.msg.hdr.ctype = BTA_AV_RSP_ACCEPT;
+        p_data->rc_msg.msg.hdr.ctype = AVRC_RSP_ACCEPT;
       } else {
         p_data->rc_msg.msg.hdr.ctype =
             bta_av_op_supported(p_data->rc_msg.msg.pass.op_id, is_inquiry);
@@ -879,13 +868,13 @@ void bta_av_rc_msg(tBTA_AV_CB* p_cb, tBTA_AV_DATA* p_data) {
       APPL_TRACE_DEBUG("ctype %d", p_data->rc_msg.msg.hdr.ctype)
 
       /* send response */
-      if (p_data->rc_msg.msg.hdr.ctype != BTA_AV_RSP_INTERIM)
+      if (p_data->rc_msg.msg.hdr.ctype != AVRC_RSP_INTERIM)
         AVRC_PassRsp(p_data->rc_msg.handle, p_data->rc_msg.label,
                      &p_data->rc_msg.msg.pass);
 
       /* set up for callback if supported */
-      if (p_data->rc_msg.msg.hdr.ctype == BTA_AV_RSP_ACCEPT ||
-          p_data->rc_msg.msg.hdr.ctype == BTA_AV_RSP_INTERIM) {
+      if (p_data->rc_msg.msg.hdr.ctype == AVRC_RSP_ACCEPT ||
+          p_data->rc_msg.msg.hdr.ctype == AVRC_RSP_INTERIM) {
         evt = BTA_AV_REMOTE_CMD_EVT;
         av.remote_cmd.rc_id = p_data->rc_msg.msg.pass.op_id;
         av.remote_cmd.key_state = p_data->rc_msg.msg.pass.state;
@@ -918,7 +907,7 @@ void bta_av_rc_msg(tBTA_AV_CB* p_cb, tBTA_AV_DATA* p_data) {
     }
     /* must be a bad ctype -> reject*/
     else {
-      p_data->rc_msg.msg.hdr.ctype = BTA_AV_RSP_REJ;
+      p_data->rc_msg.msg.hdr.ctype = AVRC_RSP_REJ;
       AVRC_PassRsp(p_data->rc_msg.handle, p_data->rc_msg.label,
                    &p_data->rc_msg.msg.pass);
     }
@@ -935,38 +924,34 @@ void bta_av_rc_msg(tBTA_AV_CB* p_cb, tBTA_AV_DATA* p_data) {
     /* if configured to support vendor specific and it's a command */
     if ((p_cb->features & BTA_AV_FEAT_VENDOR) &&
         p_data->rc_msg.msg.hdr.ctype <= AVRC_CMD_GEN_INQ) {
-#if (AVRC_METADATA_INCLUDED == TRUE)
       if ((p_cb->features & BTA_AV_FEAT_METADATA) &&
           (p_vendor->company_id == AVRC_CO_METADATA)) {
         av.meta_msg.p_msg = &p_data->rc_msg.msg;
         rc_rsp.rsp.status = BTA_AV_STS_NO_RSP;
         evt = bta_av_proc_meta_cmd(&rc_rsp, &p_data->rc_msg, &ctype);
-      } else
-#endif
+      } else {
         evt = BTA_AV_VENDOR_CMD_EVT;
-    }
-    /* else if configured to support vendor specific and it's a response */
-    else if ((p_cb->features & BTA_AV_FEAT_VENDOR) &&
-             p_data->rc_msg.msg.hdr.ctype >= AVRC_RSP_NOT_IMPL) {
-#if (AVRC_METADATA_INCLUDED == TRUE)
+      }
+    } else if ((p_cb->features & BTA_AV_FEAT_VENDOR) &&
+               p_data->rc_msg.msg.hdr.ctype >= AVRC_RSP_NOT_IMPL) {
+      /* else if configured to support vendor specific and it's a response */
       if ((p_cb->features & BTA_AV_FEAT_METADATA) &&
           (p_vendor->company_id == AVRC_CO_METADATA)) {
         av.meta_msg.p_msg = &p_data->rc_msg.msg;
         evt = BTA_AV_META_MSG_EVT;
-      } else
-#endif
+      } else {
         evt = BTA_AV_VENDOR_RSP_EVT;
-
-    }
-    /* else if not configured to support vendor specific and it's a command */
-    else if (!(p_cb->features & BTA_AV_FEAT_VENDOR) &&
-             p_data->rc_msg.msg.hdr.ctype <= AVRC_CMD_GEN_INQ) {
+      }
+    } else if (!(p_cb->features & BTA_AV_FEAT_VENDOR) &&
+               p_data->rc_msg.msg.hdr.ctype <= AVRC_CMD_GEN_INQ) {
+      /* else if not configured to support vendor specific and it's a command */
       if (p_data->rc_msg.msg.vendor.p_vendor_data[0] == AVRC_PDU_INVALID) {
         /* reject it */
-        p_data->rc_msg.msg.hdr.ctype = BTA_AV_RSP_REJ;
+        p_data->rc_msg.msg.hdr.ctype = AVRC_RSP_REJ;
         p_data->rc_msg.msg.vendor.p_vendor_data[4] = AVRC_STS_BAD_CMD;
-      } else
-        p_data->rc_msg.msg.hdr.ctype = BTA_AV_RSP_NOT_IMPL;
+      } else {
+        p_data->rc_msg.msg.hdr.ctype = AVRC_RSP_NOT_IMPL;
+      }
       AVRC_VendorRsp(p_data->rc_msg.handle, p_data->rc_msg.label,
                      &p_data->rc_msg.msg.vendor);
     }
@@ -982,7 +967,6 @@ void bta_av_rc_msg(tBTA_AV_CB* p_cb, tBTA_AV_DATA* p_data) {
     evt = BTA_AV_META_MSG_EVT;
   }
 
-#if (AVRC_METADATA_INCLUDED == TRUE)
   if (evt == 0 && rc_rsp.rsp.status != BTA_AV_STS_NO_RSP) {
     if (!p_pkt) {
       rc_rsp.rsp.opcode = p_data->rc_msg.opcode;
@@ -991,7 +975,6 @@ void bta_av_rc_msg(tBTA_AV_CB* p_cb, tBTA_AV_DATA* p_data) {
     if (p_pkt)
       AVRC_MsgReq(p_data->rc_msg.handle, p_data->rc_msg.label, ctype, p_pkt);
   }
-#endif
 
   /* call callback */
   if (evt != 0) {

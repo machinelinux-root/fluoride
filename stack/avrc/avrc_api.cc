@@ -246,7 +246,6 @@ static BT_HDR* avrc_copy_packet(BT_HDR* p_pkt, int rsp_pkt_len) {
   return p_pkt_copy;
 }
 
-#if (AVRC_METADATA_INCLUDED == TRUE)
 /******************************************************************************
  *
  * Function         avrc_prep_end_frag
@@ -604,7 +603,6 @@ static uint8_t avrc_proc_far_msg(uint8_t handle, uint8_t label, uint8_t cr,
 
   return drop_code;
 }
-#endif /* (AVRC_METADATA_INCLUDED == TRUE) */
 
 /******************************************************************************
  *
@@ -754,7 +752,6 @@ static void avrc_msg_cback(uint8_t handle, uint8_t label, uint8_t cr,
         p_msg->p_vendor_data = p_data;
         p_msg->vendor_len = p_pkt->len - (p_data - p_begin);
 
-#if (AVRC_METADATA_INCLUDED == TRUE)
         uint8_t drop_code = 0;
         if (p_msg->company_id == AVRC_CO_METADATA) {
           /* Validate length for metadata message */
@@ -789,7 +786,6 @@ static void avrc_msg_cback(uint8_t handle, uint8_t label, uint8_t cr,
               p_drop_msg = "sent_fragd";
           }
         }
-#endif /* (AVRC_METADATA_INCLUDED == TRUE) */
         /* If vendor response received, and did not ask for continuation */
         /* then check queue for addition commands to send */
         if ((cr == AVCT_RSP) && (drop_code != 2)) {
@@ -875,62 +871,6 @@ static void avrc_msg_cback(uint8_t handle, uint8_t label, uint8_t cr,
   }
 
   if (do_free) osi_free(p_pkt);
-}
-
-static void AVRC_build_empty_packet(BT_HDR* p_pkt) {
-  uint8_t* p_start = ((uint8_t*)(p_pkt + 1) + p_pkt->offset);
-  *p_start = AVRC_RSP_ACCEPT & AVRC_CTYPE_MASK;
-  p_start += AVRC_VENDOR_HDR_SIZE;
-  UINT8_TO_BE_STREAM(p_start, 0);
-  UINT8_TO_BE_STREAM(p_start, AVRC_PKT_SINGLE);
-  UINT16_TO_BE_STREAM(p_start, 0);
-  p_pkt->len = AVRC_VENDOR_HDR_SIZE + 4;
-}
-
-static void AVRC_build_error_packet(BT_HDR* p_pkt) {
-  uint8_t* p_start = ((uint8_t*)(p_pkt + 1) + p_pkt->offset);
-  *p_start = AVRC_RSP_REJ & AVRC_CTYPE_MASK;
-  p_start += AVRC_VENDOR_HDR_SIZE;
-  UINT8_TO_BE_STREAM(p_start, 0);
-  UINT8_TO_BE_STREAM(p_start, AVRC_PKT_SINGLE);
-  UINT16_TO_BE_STREAM(p_start, 1);
-  UINT8_TO_BE_STREAM(p_start, AVRC_STS_BAD_PARAM);
-  p_pkt->len = AVRC_VENDOR_HDR_SIZE + 5;
-}
-
-static uint16_t AVRC_HandleContinueRsp(uint8_t handle, uint8_t label,
-                                       BT_HDR* p_pkt) {
-  AVRC_TRACE_DEBUG("%s()", __func__);
-
-  uint8_t* p_data =
-      ((uint8_t*)(p_pkt + 1) + p_pkt->offset + AVRC_VENDOR_HDR_SIZE);
-  tAVRC_FRAG_CB* p_fcb = &avrc_cb.fcb[handle];
-
-  uint8_t pdu, pkt_type, target_pdu;
-  uint16_t len;
-
-  BE_STREAM_TO_UINT8(pdu, p_data);
-  BE_STREAM_TO_UINT8(pkt_type, p_data);
-  BE_STREAM_TO_UINT16(len, p_data);
-  BE_STREAM_TO_UINT8(target_pdu, p_data);
-
-  if (pdu == AVRC_PDU_REQUEST_CONTINUATION_RSP &&
-      target_pdu == p_fcb->frag_pdu) {
-    return avrc_send_continue_frag(handle, label);
-  }
-
-  if (pdu == AVRC_PDU_ABORT_CONTINUATION_RSP && target_pdu == p_fcb->frag_pdu) {
-    AVRC_build_empty_packet(p_pkt);
-  } else {
-    AVRC_TRACE_ERROR("%s() error: target_pdu: 0x%02x, frag_pdu: 0x%02x",
-                     __func__, *(p_data + 4), p_fcb->frag_pdu);
-    AVRC_build_error_packet(p_pkt);
-  }
-
-  p_fcb->frag_enabled = false;
-  osi_free_and_reset((void**)&p_fcb->p_fmsg);
-
-  return AVCT_MsgReq(handle, label, AVCT_RSP, p_pkt);
 }
 
 /******************************************************************************
@@ -1043,10 +983,8 @@ uint16_t AVRC_Open(uint8_t* p_handle, tAVRC_CONN_CB* p_ccb,
   if (status == AVCT_SUCCESS) {
     memcpy(&avrc_cb.ccb[*p_handle], p_ccb, sizeof(tAVRC_CONN_CB));
     memset(&avrc_cb.ccb_int[*p_handle], 0, sizeof(tAVRC_CONN_INT_CB));
-#if (AVRC_METADATA_INCLUDED == TRUE)
     memset(&avrc_cb.fcb[*p_handle], 0, sizeof(tAVRC_FRAG_CB));
     memset(&avrc_cb.rcb[*p_handle], 0, sizeof(tAVRC_RASM_CB));
-#endif
     avrc_cb.ccb_int[*p_handle].tle = alarm_new("avrcp.commandTimer");
     avrc_cb.ccb_int[*p_handle].cmd_q = fixed_queue_new(SIZE_MAX);
   }
@@ -1076,6 +1014,7 @@ uint16_t AVRC_Open(uint8_t* p_handle, tAVRC_CONN_CB* p_ccb,
  *****************************************************************************/
 uint16_t AVRC_Close(uint8_t handle) {
   AVRC_TRACE_DEBUG("%s handle:%d", __func__, handle);
+  avrc_flush_cmd_q(handle);
   return AVCT_RemoveConn(handle);
 }
 
@@ -1132,7 +1071,6 @@ uint16_t AVRC_CloseBrowse(uint8_t handle) { return AVCT_RemoveBrowse(handle); }
  *****************************************************************************/
 uint16_t AVRC_MsgReq(uint8_t handle, uint8_t label, uint8_t ctype,
                      BT_HDR* p_pkt) {
-#if (AVRC_METADATA_INCLUDED == TRUE)
   uint8_t* p_data;
   uint8_t cr = AVCT_CMD;
   bool chk_frag = true;
@@ -1149,12 +1087,6 @@ uint16_t AVRC_MsgReq(uint8_t handle, uint8_t label, uint8_t ctype,
                    handle, label, ctype, p_pkt->len);
 
   if (ctype >= AVRC_RSP_NOT_IMPL) cr = AVCT_RSP;
-
-  p_data = (uint8_t*)(p_pkt + 1) + p_pkt->offset;
-  if (*p_data == AVRC_PDU_REQUEST_CONTINUATION_RSP ||
-      *p_data == AVRC_PDU_ABORT_CONTINUATION_RSP) {
-    return AVRC_HandleContinueRsp(handle, label, p_pkt);
-  }
 
   if (p_pkt->event == AVRC_OP_VENDOR) {
     /* add AVRCP Vendor Dependent headers */
@@ -1288,9 +1220,6 @@ uint16_t AVRC_MsgReq(uint8_t handle, uint8_t label, uint8_t ctype,
   }
 
   return status;
-#else
-  return AVRC_NO_RESOURCES;
-#endif
 }
 
 /******************************************************************************
