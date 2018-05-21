@@ -236,7 +236,7 @@ tBTA_DM_PM_TYPE_QUALIFIER tBTA_DM_PM_SPEC bta_dm_pm_spec[BTA_DM_NUM_PM_SPEC] = {
     /* AV : 4 */
     {(BTA_DM_PM_SNIFF), /* allow sniff */
 #if (BTM_SSR_INCLUDED == TRUE)
-     (BTA_DM_PM_SSR2), /* the SSR entry */
+     (BTA_DM_PM_SSR0), /* the SSR entry */
 #endif
      {
          {{BTA_DM_PM_SNIFF_A2DP_IDX, 7000},
@@ -288,7 +288,7 @@ tBTA_DM_PM_TYPE_QUALIFIER tBTA_DM_PM_SPEC bta_dm_pm_spec[BTA_DM_NUM_PM_SPEC] = {
          {{BTA_DM_PM_NO_ACTION, 0}, {BTA_DM_PM_NO_ACTION, 0}}, /* app close */
          {{BTA_DM_PM_NO_ACTION, 0}, {BTA_DM_PM_NO_ACTION, 0}}, /* sco open  */
          {{BTA_DM_PM_NO_ACTION, 0}, {BTA_DM_PM_NO_ACTION, 0}}, /* sco close   */
-         {{BTA_DM_PM_SNIFF_A2DP_IDX, 5000},
+         {{BTA_DM_PM_SNIFF_A2DP_IDX, BTA_FTC_IDLE_TO_SNIFF_DELAY_MS},
           {BTA_DM_PM_NO_ACTION, 0}},                        /* idle */
          {{BTA_DM_PM_ACTIVE, 0}, {BTA_DM_PM_NO_ACTION, 0}}, /* busy */
          {{BTA_DM_PM_NO_ACTION, 0},

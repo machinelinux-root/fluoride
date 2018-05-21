@@ -185,7 +185,7 @@ void bta_sys_init(void) {
   bta_sys_register(BTA_ID_SYS, &bta_sys_hw_reg);
 
   /* register for BTM notifications */
-  BTM_RegisterForDeviceStatusNotif((tBTM_DEV_STATUS_CB*)&bta_sys_hw_btm_cback);
+  BTM_RegisterForDeviceStatusNotif(&bta_sys_hw_btm_cback);
 
 #if (defined BTA_AR_INCLUDED) && (BTA_AR_INCLUDED == TRUE)
   bta_ar_init();
@@ -547,19 +547,29 @@ void bta_sys_sendmsg(void* p_msg) {
  *
  * Description      Post a closure to be ran in the bta thread
  *
- * Returns          void
+ * Returns          BT_STATUS_SUCCESS on success
  *
  ******************************************************************************/
-void do_in_bta_thread(const tracked_objects::Location& from_here,
-                      const base::Closure& task) {
+bt_status_t do_in_bta_thread(const tracked_objects::Location& from_here,
+                             const base::Closure& task) {
   base::MessageLoop* bta_message_loop = get_message_loop();
-
-  if (!bta_message_loop || !bta_message_loop->task_runner().get()) {
+  if (!bta_message_loop) {
     APPL_TRACE_ERROR("%s: MessageLooper not initialized", __func__);
-    return;
+    return BT_STATUS_FAIL;
   }
 
-  bta_message_loop->task_runner()->PostTask(from_here, task);
+  scoped_refptr<base::SingleThreadTaskRunner> task_runner =
+      bta_message_loop->task_runner();
+  if (!task_runner.get()) {
+    APPL_TRACE_ERROR("%s: task runner is dead", __func__);
+    return BT_STATUS_FAIL;
+  }
+
+  if (!task_runner->PostTask(from_here, task)) {
+    APPL_TRACE_ERROR("%s: Post task to task runner failed!", __func__);
+    return BT_STATUS_FAIL;
+  }
+  return BT_STATUS_SUCCESS;
 }
 
 /*******************************************************************************
@@ -599,7 +609,7 @@ void bta_sys_disable(tBTA_SYS_HW_MODULE module) {
 
   switch (module) {
     case BTA_SYS_HW_BLUETOOTH:
-      bta_id = BTA_ID_DM;
+      bta_id = BTA_ID_DM_SEARCH;
       bta_id_max = BTA_ID_BLUETOOTH_MAX;
       break;
     default:

@@ -485,37 +485,38 @@ static void btm_ble_vendor_capability_vsc_cmpl_cback(
   BTM_TRACE_DEBUG("%s", __func__);
 
   /* Check status of command complete event */
-  if ((p_vcs_cplt_params->opcode == HCI_BLE_VENDOR_CAP_OCF) &&
-      (p_vcs_cplt_params->param_len > 0)) {
-    p = p_vcs_cplt_params->p_param_buf;
-    STREAM_TO_UINT8(status, p);
+  CHECK(p_vcs_cplt_params->opcode == HCI_BLE_VENDOR_CAP_OCF);
+  CHECK(p_vcs_cplt_params->param_len > 0);
+
+  p = p_vcs_cplt_params->p_param_buf;
+  STREAM_TO_UINT8(status, p);
+
+  if (status != HCI_SUCCESS) {
+    BTM_TRACE_DEBUG("%s: Status = 0x%02x (0 is success)", __func__, status);
+    return;
+  }
+  STREAM_TO_UINT8(btm_cb.cmn_ble_vsc_cb.adv_inst_max, p);
+  STREAM_TO_UINT8(btm_cb.cmn_ble_vsc_cb.rpa_offloading, p);
+  STREAM_TO_UINT16(btm_cb.cmn_ble_vsc_cb.tot_scan_results_strg, p);
+  STREAM_TO_UINT8(btm_cb.cmn_ble_vsc_cb.max_irk_list_sz, p);
+  STREAM_TO_UINT8(btm_cb.cmn_ble_vsc_cb.filter_support, p);
+  STREAM_TO_UINT8(btm_cb.cmn_ble_vsc_cb.max_filter, p);
+  STREAM_TO_UINT8(btm_cb.cmn_ble_vsc_cb.energy_support, p);
+
+  if (p_vcs_cplt_params->param_len >
+      BTM_VSC_CHIP_CAPABILITY_RSP_LEN_L_RELEASE) {
+    STREAM_TO_UINT16(btm_cb.cmn_ble_vsc_cb.version_supported, p);
+  } else {
+    btm_cb.cmn_ble_vsc_cb.version_supported = BTM_VSC_CHIP_CAPABILITY_L_VERSION;
   }
 
-  if (status == HCI_SUCCESS) {
-    STREAM_TO_UINT8(btm_cb.cmn_ble_vsc_cb.adv_inst_max, p);
-    STREAM_TO_UINT8(btm_cb.cmn_ble_vsc_cb.rpa_offloading, p);
-    STREAM_TO_UINT16(btm_cb.cmn_ble_vsc_cb.tot_scan_results_strg, p);
-    STREAM_TO_UINT8(btm_cb.cmn_ble_vsc_cb.max_irk_list_sz, p);
-    STREAM_TO_UINT8(btm_cb.cmn_ble_vsc_cb.filter_support, p);
-    STREAM_TO_UINT8(btm_cb.cmn_ble_vsc_cb.max_filter, p);
-    STREAM_TO_UINT8(btm_cb.cmn_ble_vsc_cb.energy_support, p);
-
-    if (p_vcs_cplt_params->param_len >
-        BTM_VSC_CHIP_CAPABILITY_RSP_LEN_L_RELEASE) {
-      STREAM_TO_UINT16(btm_cb.cmn_ble_vsc_cb.version_supported, p);
-    } else {
-      btm_cb.cmn_ble_vsc_cb.version_supported =
-          BTM_VSC_CHIP_CAPABILITY_L_VERSION;
-    }
-
-    if (btm_cb.cmn_ble_vsc_cb.version_supported >=
-        BTM_VSC_CHIP_CAPABILITY_M_VERSION) {
-      STREAM_TO_UINT16(btm_cb.cmn_ble_vsc_cb.total_trackable_advertisers, p);
-      STREAM_TO_UINT16(btm_cb.cmn_ble_vsc_cb.extended_scan_support, p);
-      STREAM_TO_UINT16(btm_cb.cmn_ble_vsc_cb.debug_logging_supported, p);
-    }
-    btm_cb.cmn_ble_vsc_cb.values_read = true;
+  if (btm_cb.cmn_ble_vsc_cb.version_supported >=
+      BTM_VSC_CHIP_CAPABILITY_M_VERSION) {
+    STREAM_TO_UINT16(btm_cb.cmn_ble_vsc_cb.total_trackable_advertisers, p);
+    STREAM_TO_UINT16(btm_cb.cmn_ble_vsc_cb.extended_scan_support, p);
+    STREAM_TO_UINT16(btm_cb.cmn_ble_vsc_cb.debug_logging_supported, p);
   }
+  btm_cb.cmn_ble_vsc_cb.values_read = true;
 
   BTM_TRACE_DEBUG(
       "%s: stat=%d, irk=%d, ADV ins:%d, rpa=%d, ener=%d, ext_scan=%d", __func__,
@@ -722,6 +723,7 @@ void BTM_BleStartAutoConn() {
  *
  ******************************************************************************/
 void BTM_BleClearBgConnDev(void) {
+  if (!controller_get_interface()->supports_ble()) return;
   btm_ble_start_auto_conn(false);
   btm_ble_clear_white_list();
   gatt_reset_bgdev_list();
@@ -1909,13 +1911,20 @@ void btm_ble_process_ext_adv_pkt(uint8_t data_len, uint8_t* data) {
 
     uint8_t* pkt_data = p;
     p += pkt_data_len; /* Advance to the the next packet*/
-
-    if (rssi >= 21 && rssi <= 126) {
-      BTM_TRACE_ERROR("%s: bad rssi value in advertising report: ", __func__,
-                      pkt_data_len, rssi);
+    if (p > data + data_len) {
+      LOG(ERROR) << "Invalid pkt_data_len: " << +pkt_data_len;
+      return;
     }
 
-    btm_ble_process_adv_addr(bda, &addr_type);
+    if (rssi >= 21 && rssi <= 126) {
+      BTM_TRACE_ERROR("%s: bad rssi value in advertising report: %d", __func__,
+                      rssi);
+    }
+
+    if (addr_type != BLE_ADDR_ANONYMOUS) {
+      btm_ble_process_adv_addr(bda, &addr_type);
+    }
+
     btm_ble_process_adv_pkt_cont(event_type, addr_type, bda, primary_phy,
                                  secondary_phy, advertising_sid, tx_power, rssi,
                                  periodic_adv_int, pkt_data_len, pkt_data);
@@ -1954,6 +1963,10 @@ void btm_ble_process_adv_pkt(uint8_t data_len, uint8_t* data) {
 
     uint8_t* pkt_data = p;
     p += pkt_data_len; /* Advance to the the rssi byte */
+    if (p > data + data_len - sizeof(rssi)) {
+      LOG(ERROR) << "Invalid pkt_data_len: " << +pkt_data_len;
+      return;
+    }
 
     STREAM_TO_INT8(rssi, p);
 
@@ -2013,7 +2026,8 @@ static void btm_ble_process_adv_pkt_cont(
   bool is_start =
       ble_evt_type_is_legacy(evt_type) && is_scannable && !is_scan_resp;
 
-  if (is_start) AdvertiseDataParser::RemoveTrailingZeros(tmp);
+  if (ble_evt_type_is_legacy(evt_type))
+    AdvertiseDataParser::RemoveTrailingZeros(tmp);
 
   // We might have send scan request to this device before, but didn't get the
   // response. In such case make sure data is put at start, not appended to
@@ -2553,7 +2567,7 @@ void btm_ble_update_link_topology_mask(uint8_t link_role, bool increase) {
  ******************************************************************************/
 void btm_ble_update_mode_operation(uint8_t link_role, const RawAddress* bd_addr,
                                    uint8_t status) {
-  if (status == HCI_ERR_DIRECTED_ADVERTISING_TIMEOUT) {
+  if (status == HCI_ERR_ADVERTISING_TIMEOUT) {
     btm_cb.ble_ctr_cb.inq_var.adv_mode = BTM_BLE_ADV_DISABLE;
     /* make device fall back into undirected adv mode by default */
     btm_cb.ble_ctr_cb.inq_var.directed_conn = BTM_BLE_CONNECT_EVT;
@@ -2568,7 +2582,7 @@ void btm_ble_update_mode_operation(uint8_t link_role, const RawAddress* bd_addr,
 
   /* in case of disconnected, we must cancel bgconn and restart
      in order to add back device to white list in order to reconnect */
-  btm_ble_bgconn_cancel_if_disconnected(*bd_addr);
+  if (bd_addr) btm_ble_bgconn_cancel_if_disconnected(*bd_addr);
 
   /* when no connection is attempted, and controller is not rejecting last
      request

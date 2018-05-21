@@ -18,6 +18,7 @@
 
 #include <string.h>
 #include "btif_common.h"
+#include "btif_storage.h"
 #include "device/include/interop.h"
 #include "internal_include/bt_target.h"
 #include "stack/btm/btm_int.h"
@@ -104,7 +105,7 @@ void smp_send_app_cback(tSMP_CB* p_cb, tSMP_INT_DATA* p_data) {
       case SMP_IO_CAP_REQ_EVT:
         cb_data.io_req.auth_req = p_cb->peer_auth_req;
         cb_data.io_req.oob_data = SMP_OOB_NONE;
-        cb_data.io_req.io_cap = SMP_DEFAULT_IO_CAPS;
+        cb_data.io_req.io_cap = btif_storage_get_local_io_caps_ble();
         cb_data.io_req.max_key_size = SMP_MAX_ENC_KEY_SIZE;
         cb_data.io_req.init_keys = p_cb->local_i_key;
         cb_data.io_req.resp_keys = p_cb->local_r_key;
@@ -165,15 +166,17 @@ void smp_send_app_cback(tSMP_CB* p_cb, tSMP_INT_DATA* p_data) {
 
           p_cb->secure_connections_only_mode_required =
               (btm_cb.security_mode == BTM_SEC_MODE_SC) ? true : false;
-
+          /* just for PTS, force SC bit */
           if (p_cb->secure_connections_only_mode_required) {
             p_cb->loc_auth_req |= SMP_SC_SUPPORT_BIT;
           }
 
-          if (!(p_cb->loc_auth_req & SMP_SC_SUPPORT_BIT) ||
-              lmp_version_below(p_cb->pairing_bda, HCI_PROTO_VERSION_4_2) ||
-              interop_match_addr(INTEROP_DISABLE_LE_SECURE_CONNECTIONS,
-                                 (const RawAddress*)&p_cb->pairing_bda)) {
+          if (!p_cb->secure_connections_only_mode_required &&
+              (!(p_cb->loc_auth_req & SMP_SC_SUPPORT_BIT) ||
+               lmp_version_below(p_cb->pairing_bda, HCI_PROTO_VERSION_4_2) ||
+               interop_match_addr(INTEROP_DISABLE_LE_SECURE_CONNECTIONS,
+                                  (const RawAddress*)&p_cb->pairing_bda))) {
+            p_cb->loc_auth_req &= ~SMP_SC_SUPPORT_BIT;
             p_cb->loc_auth_req &= ~SMP_KP_SUPPORT_BIT;
             p_cb->local_i_key &= ~SMP_SEC_KEY_TYPE_LK;
             p_cb->local_r_key &= ~SMP_SEC_KEY_TYPE_LK;
@@ -499,7 +502,9 @@ void smp_proc_pair_cmd(tSMP_CB* p_cb, tSMP_INT_DATA* p_data) {
   uint8_t* p = p_data->p_data;
   tBTM_SEC_DEV_REC* p_dev_rec = btm_find_dev(p_cb->pairing_bda);
 
-  SMP_TRACE_DEBUG("%s", __func__);
+  SMP_TRACE_DEBUG("%s: pairing_bda=%s", __func__,
+                  p_cb->pairing_bda.ToString().c_str());
+
   /* erase all keys if it is slave proc pairing req */
   if (p_dev_rec && (p_cb->role == HCI_ROLE_SLAVE))
     btm_sec_clear_ble_keys(p_dev_rec);
@@ -1998,6 +2003,14 @@ void smp_br_process_link_key(tSMP_CB* p_cb, tSMP_INT_DATA* p_data) {
     smp_int_data.status = status;
     smp_sm_event(p_cb, SMP_BR_AUTH_CMPL_EVT, &smp_int_data);
     return;
+  }
+
+  tBTM_SEC_DEV_REC* p_dev_rec = btm_find_dev(p_cb->pairing_bda);
+  if (p_dev_rec) {
+    SMP_TRACE_DEBUG("%s: dev_type = %d ", __func__, p_dev_rec->device_type);
+    p_dev_rec->device_type |= BT_DEVICE_TYPE_BLE;
+  } else {
+    SMP_TRACE_ERROR("%s failed to find Security Record", __func__);
   }
 
   SMP_TRACE_DEBUG("%s: LTK derivation from LK successfully completed",

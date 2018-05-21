@@ -39,19 +39,19 @@
 #include "bta_sys.h"
 #include "btm_api.h"
 #include "btm_int.h"
+#include "device/include/controller.h"
 #include "gap_api.h"
 #include "l2c_api.h"
 #include "osi/include/allocator.h"
 #include "port_api.h"
 #include "rfcdefs.h"
 #include "sdp_api.h"
+#include "stack/l2cap/l2c_int.h"
 #include "utl.h"
 
 #include "osi/include/osi.h"
 
 using bluetooth::Uuid;
-
-constexpr uint16_t DEFAULT_LE_MPS = 23;
 
 tBTA_JV_CB bta_jv_cb;
 
@@ -480,7 +480,7 @@ static tBTA_JV_STATUS bta_jv_free_set_pm_profile_cb(uint32_t jv_handle) {
 static tBTA_JV_PM_CB* bta_jv_alloc_set_pm_profile_cb(uint32_t jv_handle,
                                                      tBTA_JV_PM_ID app_id) {
   bool bRfcHandle = (jv_handle & BTA_JV_RFCOMM_MASK) != 0;
-  RawAddress peer_bd_addr;
+  RawAddress peer_bd_addr = RawAddress::kEmpty;
   int i, j;
   tBTA_JV_PM_CB** pp_cb;
 
@@ -494,8 +494,9 @@ static tBTA_JV_PM_CB* bta_jv_alloc_set_pm_profile_cb(uint32_t jv_handle,
             pp_cb = &bta_jv_cb.port_cb[j].p_pm_cb;
             if (PORT_SUCCESS !=
                 PORT_CheckConnection(bta_jv_cb.port_cb[j].port_handle,
-                                     peer_bd_addr, NULL))
+                                     &peer_bd_addr, NULL)) {
               i = BTA_JV_PM_MAX_NUM;
+            }
             break;
           }
         }
@@ -532,7 +533,7 @@ static tBTA_JV_PM_CB* bta_jv_alloc_set_pm_profile_cb(uint32_t jv_handle,
   }
   LOG(WARNING) << __func__ << ": handle=" << loghex(jv_handle)
                << ", app_id=" << app_id << ", return NULL";
-  return (tBTA_JV_PM_CB*)NULL;
+  return NULL;
 }
 
 /*******************************************************************************
@@ -604,7 +605,7 @@ void bta_jv_enable(tBTA_JV_DM_CBACK* p_cback) {
 }
 
 /** Disables the BT device manager free the resources used by java */
-void bta_jv_disable() { LOG(ERROR) << __func__; }
+void bta_jv_disable() { LOG(INFO) << __func__; }
 
 /**
  * We keep a list of PSM's that have been freed from JAVA, for reuse.
@@ -688,6 +689,10 @@ void bta_jv_get_channel_id(
       }
       break;
     case BTA_JV_CONN_TYPE_L2CAP_LE:
+      psm = L2CA_AllocateLePSM();
+      if (psm == 0) {
+        LOG(ERROR) << __func__ << ": Error: No free LE PSM available";
+      }
       break;
     default:
       break;
@@ -716,7 +721,8 @@ void bta_jv_free_scn(int32_t type /* One of BTA_JV_CONN_TYPE_ */,
       bta_jv_set_free_psm(scn);
       break;
     case BTA_JV_CONN_TYPE_L2CAP_LE:
-      // TODO: Not yet implemented...
+      VLOG(2) << __func__ << ": type=BTA_JV_CONN_TYPE_L2CAP_LE. psm=" << scn;
+      L2CA_FreeLePSM(scn);
       break;
     default:
       break;
@@ -844,7 +850,8 @@ void bta_jv_delete_record(uint32_t handle) {
  * Returns      void
  *
  ******************************************************************************/
-static void bta_jv_l2cap_client_cback(uint16_t gap_handle, uint16_t event) {
+static void bta_jv_l2cap_client_cback(uint16_t gap_handle, uint16_t event,
+                                      tGAP_CB_DATA* data) {
   tBTA_JV_L2C_CB* p_cb = &bta_jv_cb.l2c_cb[gap_handle];
   tBTA_JV evt_data;
 
@@ -935,9 +942,10 @@ void bta_jv_l2cap_connect(int32_t type, tBTA_SEC sec_mask, tBTA_JV_ROLE role,
     if ((type != BTA_JV_CONN_TYPE_L2CAP) ||
         (bta_jv_check_psm(remote_psm))) /* allowed */
     {
-      handle = GAP_ConnOpen("", sec_id, 0, &peer_bd_addr, remote_psm,
-                            DEFAULT_LE_MPS, &cfg, ertm_info.get(), sec_mask,
-                            chan_mode_mask, bta_jv_l2cap_client_cback, type);
+      uint16_t max_mps = 0xffff;  // Let GAP_ConnOpen set the max_mps.
+      handle = GAP_ConnOpen("", sec_id, 0, &peer_bd_addr, remote_psm, max_mps,
+                            &cfg, ertm_info.get(), sec_mask, chan_mode_mask,
+                            bta_jv_l2cap_client_cback, type);
       if (handle != GAP_INVALID_HANDLE) {
         evt_data.status = BTA_JV_SUCCESS;
       }
@@ -991,7 +999,8 @@ void bta_jv_l2cap_close(uint32_t handle, tBTA_JV_L2C_CB* p_cb) {
  * Returns          void
  *
  ******************************************************************************/
-static void bta_jv_l2cap_server_cback(uint16_t gap_handle, uint16_t event) {
+static void bta_jv_l2cap_server_cback(uint16_t gap_handle, uint16_t event,
+                                      tGAP_CB_DATA* data) {
   tBTA_JV_L2C_CB* p_cb = &bta_jv_cb.l2c_cb[gap_handle];
   tBTA_JV evt_data;
   tBTA_JV_L2CAP_CBACK* p_cback;
@@ -1081,13 +1090,14 @@ void bta_jv_l2cap_start_server(int32_t type, tBTA_SEC sec_mask,
   */
 
   uint8_t sec_id = bta_jv_alloc_sec_id();
+  uint16_t max_mps = 0xffff;  // Let GAP_ConnOpen set the max_mps.
   /* PSM checking is not required for LE COC */
   if (0 == sec_id ||
       ((type == BTA_JV_CONN_TYPE_L2CAP) && (!bta_jv_check_psm(local_psm))) ||
-      (handle = GAP_ConnOpen("JV L2CAP", sec_id, 1, nullptr, local_psm,
-                             DEFAULT_LE_MPS, &cfg, ertm_info.get(), sec_mask,
-                             chan_mode_mask, bta_jv_l2cap_server_cback,
-                             type)) == GAP_INVALID_HANDLE) {
+      (handle = GAP_ConnOpen("JV L2CAP", sec_id, 1, nullptr, local_psm, max_mps,
+                             &cfg, ertm_info.get(), sec_mask, chan_mode_mask,
+                             bta_jv_l2cap_server_cback, type)) ==
+          GAP_INVALID_HANDLE) {
     bta_jv_free_sec_id(&sec_id);
     evt_data.status = BTA_JV_FAILURE;
   } else {
@@ -1131,8 +1141,8 @@ void bta_jv_l2cap_stop_server(uint16_t local_psm, uint32_t l2cap_socket_id) {
 }
 
 /* Write data to an L2CAP connection */
-void bta_jv_l2cap_write(uint32_t handle, uint32_t req_id, uint8_t* p_data,
-                        uint16_t len, uint32_t user_id, tBTA_JV_L2C_CB* p_cb) {
+void bta_jv_l2cap_write(uint32_t handle, uint32_t req_id, BT_HDR* msg,
+                        uint32_t user_id, tBTA_JV_L2C_CB* p_cb) {
   /* As we check this callback exists before the tBTA_JV_API_L2CAP_WRITE can be
    * send through the API this check should not be needed. But the API is not
    * designed to be used (safely at least) in a multi-threaded scheduler, hence
@@ -1153,6 +1163,7 @@ void bta_jv_l2cap_write(uint32_t handle, uint32_t req_id, uint8_t* p_data,
      * channel is disconnected after the API function is called, but before the
      * message is handled. */
     LOG(ERROR) << __func__ << ": p_cb->p_cback == NULL";
+    osi_free(msg);
     return;
   }
 
@@ -1160,14 +1171,21 @@ void bta_jv_l2cap_write(uint32_t handle, uint32_t req_id, uint8_t* p_data,
   evt_data.status = BTA_JV_FAILURE;
   evt_data.handle = handle;
   evt_data.req_id = req_id;
-  evt_data.p_data = p_data;
   evt_data.cong = p_cb->cong;
-  evt_data.len = 0;
+  evt_data.len = msg->len;
+
   bta_jv_pm_conn_busy(p_cb->p_pm_cb);
-  if (!evt_data.cong &&
-      BT_PASS == GAP_ConnWriteData(handle, p_data, len, &evt_data.len)) {
-    evt_data.status = BTA_JV_SUCCESS;
+
+  // TODO: this was set only for non-fixed channel packets. Is that needed ?
+  msg->event = BT_EVT_TO_BTU_SP_DATA;
+
+  if (evt_data.cong) {
+    osi_free(msg);
+  } else {
+    if (GAP_ConnWriteData(handle, msg) == BT_PASS)
+      evt_data.status = BTA_JV_SUCCESS;
   }
+
   tBTA_JV bta_jv;
   bta_jv.l2c_write = evt_data;
   p_cb->p_cback(BTA_JV_L2CAP_WRITE_EVT, &bta_jv, user_id);
@@ -1175,20 +1193,14 @@ void bta_jv_l2cap_write(uint32_t handle, uint32_t req_id, uint8_t* p_data,
 
 /* Write data to an L2CAP connection using Fixed channels */
 void bta_jv_l2cap_write_fixed(uint16_t channel, const RawAddress& addr,
-                              uint32_t req_id, uint8_t* p_data, uint16_t len,
-                              uint32_t user_id, tBTA_JV_L2CAP_CBACK* p_cback) {
+                              uint32_t req_id, BT_HDR* msg, uint32_t user_id,
+                              tBTA_JV_L2CAP_CBACK* p_cback) {
   tBTA_JV_L2CAP_WRITE_FIXED evt_data;
   evt_data.status = BTA_JV_FAILURE;
   evt_data.channel = channel;
   evt_data.addr = addr;
   evt_data.req_id = req_id;
-  evt_data.p_data = p_data;
   evt_data.len = 0;
-
-  BT_HDR* msg = (BT_HDR*)osi_malloc(sizeof(BT_HDR) + len + L2CAP_MIN_OFFSET);
-  memcpy(((uint8_t*)(msg + 1)) + L2CAP_MIN_OFFSET, p_data, len);
-  msg->len = len;
-  msg->offset = L2CAP_MIN_OFFSET;
 
   L2CA_SendFixedChnlData(channel, addr, msg);
 
@@ -1243,7 +1255,7 @@ static void bta_jv_port_mgmt_cl_cback(uint32_t code, uint16_t port_handle) {
   tBTA_JV_RFC_CB* p_cb = bta_jv_rfc_port_to_cb(port_handle);
   tBTA_JV_PCB* p_pcb = bta_jv_rfc_port_to_pcb(port_handle);
   tBTA_JV evt_data;
-  RawAddress rem_bda;
+  RawAddress rem_bda = RawAddress::kEmpty;
   uint16_t lcid;
   tBTA_JV_RFCOMM_CBACK* p_cback; /* the callback function */
 
@@ -1253,7 +1265,7 @@ static void bta_jv_port_mgmt_cl_cback(uint32_t code, uint16_t port_handle) {
   VLOG(2) << __func__ << ": code=" << code << ", port_handle=" << port_handle
           << ", handle=" << p_cb->handle;
 
-  PORT_CheckConnection(port_handle, rem_bda, &lcid);
+  PORT_CheckConnection(port_handle, &rem_bda, &lcid);
 
   if (code == PORT_SUCCESS) {
     evt_data.rfc_open.handle = p_cb->handle;
@@ -1440,7 +1452,7 @@ static void bta_jv_port_mgmt_sr_cback(uint32_t code, uint16_t port_handle) {
   tBTA_JV_PCB* p_pcb = bta_jv_rfc_port_to_pcb(port_handle);
   tBTA_JV_RFC_CB* p_cb = bta_jv_rfc_port_to_cb(port_handle);
   tBTA_JV evt_data;
-  RawAddress rem_bda;
+  RawAddress rem_bda = RawAddress::kEmpty;
   uint16_t lcid;
   VLOG(2) << __func__ << ": code=" << code << ", port_handle=" << port_handle;
   if (NULL == p_cb || NULL == p_cb->p_cback) {
@@ -1454,9 +1466,13 @@ static void bta_jv_port_mgmt_sr_cback(uint32_t code, uint16_t port_handle) {
           << ", handle=" << loghex(p_cb->handle) << ", p_pcb" << p_pcb
           << ", user=" << p_pcb->rfcomm_slot_id;
 
-  PORT_CheckConnection(port_handle, rem_bda, &lcid);
+  int status = PORT_CheckConnection(port_handle, &rem_bda, &lcid);
   int failed = true;
   if (code == PORT_SUCCESS) {
+    if (status != PORT_SUCCESS) {
+      LOG(ERROR) << __func__ << ": PORT_CheckConnection returned " << status
+                 << ", although port is supposed to be connected";
+    }
     evt_data.rfc_srv_open.handle = p_pcb->handle;
     evt_data.rfc_srv_open.status = BTA_JV_SUCCESS;
     evt_data.rfc_srv_open.rem_bda = rem_bda;
@@ -1510,7 +1526,11 @@ static void bta_jv_port_event_sr_cback(uint32_t code, uint16_t port_handle) {
   tBTA_JV_RFC_CB* p_cb = bta_jv_rfc_port_to_cb(port_handle);
   tBTA_JV evt_data;
 
-  if (NULL == p_cb || NULL == p_cb->p_cback) return;
+  if (NULL == p_cb || NULL == p_cb->p_cback) {
+    LOG(ERROR) << __func__ << ": p_cb=" << p_cb
+               << ", p_cb->p_cback=" << (p_cb ? p_cb->p_cback : 0);
+    return;
+  }
 
   VLOG(2) << __func__ << ": code=" << loghex(code)
           << ", port_handle=" << port_handle << ", handle=" << p_cb->handle;

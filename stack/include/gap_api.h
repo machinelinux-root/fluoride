@@ -77,6 +77,7 @@
 #define GAP_EVT_CONN_CONGESTED 0x0103
 #define GAP_EVT_CONN_UNCONGESTED 0x0104
 #define GAP_EVT_TX_EMPTY 0x0105
+#define GAP_EVT_LE_COC_CREDITS 0x0106
 
 /* Values for 'chan_mode_mask' field */
 /* GAP_ConnOpen() - optional channels to negotiate */
@@ -105,13 +106,24 @@
 #define GAP_PREFER_CONN_SP_TOUT 2000
 #endif
 
+struct tGAP_COC_CREDITS {
+  uint16_t gap_handle;
+  uint16_t credits_received;
+  uint16_t credit_count;
+};
+
+union tGAP_CB_DATA {
+  tGAP_COC_CREDITS coc_credits;
+};
+
 /*****************************************************************************
  *  Type Definitions
  ****************************************************************************/
 /*
  * Callback function for connection services
 */
-typedef void(tGAP_CONN_CALLBACK)(uint16_t gap_handle, uint16_t event);
+typedef void(tGAP_CONN_CALLBACK)(uint16_t gap_handle, uint16_t event,
+                                 tGAP_CB_DATA* data);
 
 /*
  * Define the callback function prototypes.  Parameters are specific
@@ -239,8 +251,7 @@ extern uint16_t GAP_ConnBTRead(uint16_t gap_handle, BT_HDR** pp_buf);
  *                  GAP_CONGESTION          - system is congested
  *
  ******************************************************************************/
-extern uint16_t GAP_ConnWriteData(uint16_t gap_handle, uint8_t* p_data,
-                                  uint16_t max_len, uint16_t* p_len);
+extern uint16_t GAP_ConnWriteData(uint16_t gap_handle, BT_HDR* msg);
 
 /*******************************************************************************
  *

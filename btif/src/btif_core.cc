@@ -46,6 +46,7 @@
 #include "bt_common.h"
 #include "bt_utils.h"
 #include "bta_api.h"
+#include "bta_closure_api.h"
 #include "bte.h"
 #include "btif_api.h"
 #include "btif_av.h"
@@ -224,14 +225,20 @@ bt_status_t btif_transfer_context(tBTIF_CBACK* p_cback, uint16_t event,
  **/
 bt_status_t do_in_jni_thread(const tracked_objects::Location& from_here,
                              const base::Closure& task) {
-  if (!message_loop_ || !message_loop_->task_runner().get()) {
+  if (!message_loop_) {
     BTIF_TRACE_WARNING("%s: Dropped message, message_loop not initialized yet!",
                        __func__);
     return BT_STATUS_FAIL;
   }
 
-  if (message_loop_->task_runner()->PostTask(from_here, task))
-    return BT_STATUS_SUCCESS;
+  scoped_refptr<base::SingleThreadTaskRunner> task_runner =
+      message_loop_->task_runner();
+  if (!task_runner.get()) {
+    BTIF_TRACE_WARNING("%s: task runner is dead", __func__);
+    return BT_STATUS_FAIL;
+  }
+
+  if (task_runner->PostTask(from_here, task)) return BT_STATUS_SUCCESS;
 
   BTIF_TRACE_ERROR("%s: Post task to task runner failed!", __func__);
   return BT_STATUS_FAIL;
@@ -469,7 +476,7 @@ void btif_enable_bluetooth_evt(tBTA_STATUS status) {
 bt_status_t btif_disable_bluetooth(void) {
   LOG_INFO(LOG_TAG, "%s entered", __func__);
 
-  btm_ble_multi_adv_cleanup();
+  do_in_bta_thread(FROM_HERE, base::Bind(&btm_ble_multi_adv_cleanup));
   // TODO(jpawlowski): this should do whole BTA_VendorCleanup(), but it would
   // kill the stack now.
 
@@ -520,7 +527,7 @@ void btif_disable_bluetooth_evt(void) {
 bt_status_t btif_cleanup_bluetooth(void) {
   LOG_INFO(LOG_TAG, "%s entered", __func__);
 
-  BTA_VendorCleanup();
+  do_in_bta_thread(FROM_HERE, base::Bind(&BTA_VendorCleanup));
 
   btif_dm_cleanup();
   btif_jni_disassociate();
@@ -611,7 +618,8 @@ bt_status_t btif_dut_mode_send(uint16_t opcode, uint8_t* buf, uint8_t len) {
  ****************************************************************************/
 
 static bt_status_t btif_in_get_adapter_properties(void) {
-  bt_property_t properties[6];
+  const static uint32_t NUM_ADAPTER_PROPERTIES = 8;
+  bt_property_t properties[NUM_ADAPTER_PROPERTIES];
   uint32_t num_props = 0;
 
   RawAddress addr;
@@ -621,6 +629,8 @@ static bt_status_t btif_in_get_adapter_properties(void) {
   RawAddress bonded_devices[BTM_SEC_MAX_DEVICE_RECORDS];
   Uuid local_uuids[BT_MAX_NUM_UUIDS];
   bt_status_t status;
+  bt_io_cap_t local_bt_io_cap;
+  bt_io_cap_t local_bt_io_cap_ble;
 
   /* RawAddress */
   BTIF_STORAGE_FILL_PROPERTY(&properties[num_props], BT_PROPERTY_BDADDR,
@@ -662,6 +672,18 @@ static bt_status_t btif_in_get_adapter_properties(void) {
   /* LOCAL UUIDs */
   BTIF_STORAGE_FILL_PROPERTY(&properties[num_props], BT_PROPERTY_UUIDS,
                              sizeof(local_uuids), local_uuids);
+  btif_storage_get_adapter_property(&properties[num_props]);
+  num_props++;
+
+  /* LOCAL IO Capabilities */
+  BTIF_STORAGE_FILL_PROPERTY(&properties[num_props], BT_PROPERTY_LOCAL_IO_CAPS,
+                             sizeof(bt_io_cap_t), &local_bt_io_cap);
+  btif_storage_get_adapter_property(&properties[num_props]);
+  num_props++;
+
+  BTIF_STORAGE_FILL_PROPERTY(&properties[num_props],
+                             BT_PROPERTY_LOCAL_IO_CAPS_BLE, sizeof(bt_io_cap_t),
+                             &local_bt_io_cap_ble);
   btif_storage_get_adapter_property(&properties[num_props]);
   num_props++;
 
@@ -1015,6 +1037,13 @@ bt_status_t btif_set_adapter_property(const bt_property_t* property) {
        * BTA events */
       status = BT_STATUS_FAIL;
       break;
+    case BT_PROPERTY_LOCAL_IO_CAPS:
+    case BT_PROPERTY_LOCAL_IO_CAPS_BLE: {
+      // Changing IO Capability of stack at run-time is not currently supported.
+      // This call changes the stored value which will affect the stack next
+      // time it starts up.
+      storage_req_id = BTIF_CORE_STORAGE_ADAPTER_WRITE;
+    } break;
     default:
       BTIF_TRACE_ERROR("btif_get_adapter_property : invalid type %d",
                        property->type);

@@ -459,7 +459,7 @@ static tGATT_STATUS gatt_build_primary_service_rsp(
     if (!p_uuid) continue;
 
     if (op_code == GATT_REQ_READ_BY_GRP_TYPE)
-      handle_len = 4 + p_uuid->GetShortestRepresentationSize();
+      handle_len = 4 + gatt_build_uuid_to_stream_len(*p_uuid);
 
     /* get the length byte in the repsonse */
     if (p_msg->offset == 0) {
@@ -482,8 +482,8 @@ static tGATT_STATUS gatt_build_primary_service_rsp(
 
     UINT16_TO_STREAM(p, el.s_hdl);
 
-    if (gatt_cb.last_primary_s_handle &&
-        gatt_cb.last_primary_s_handle == el.s_hdl) {
+    if (gatt_cb.last_service_handle &&
+        gatt_cb.last_service_handle == el.s_hdl) {
       VLOG(1) << "Use 0xFFFF for the last primary attribute";
       /* see GATT ERRATA 4065, 4063, ATT ERRATA 4062 */
       UINT16_TO_STREAM(p, 0xFFFF);
@@ -567,7 +567,7 @@ static tGATT_STATUS read_handles(uint16_t& len, uint8_t*& p, uint16_t& s_hdl,
 
   if (s_hdl > e_hdl || !GATT_HANDLE_IS_VALID(s_hdl) ||
       !GATT_HANDLE_IS_VALID(e_hdl)) {
-    return GATT_INVALID_PDU;
+    return GATT_INVALID_HANDLE;
   }
 
   return GATT_SUCCESS;

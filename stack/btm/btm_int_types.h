@@ -291,10 +291,6 @@ typedef struct {
   uint8_t state;      /* Current state that the inquiry process is in */
   uint8_t inq_active; /* Bit Mask indicating type of inquiry is active */
   bool no_inc_ssp;    /* true, to stop inquiry on incoming SSP */
-#if (BTA_HOST_INTERLEAVE_SEARCH == TRUE)
-  btm_inq_state
-      next_state; /*interleaving state to determine next mode to be inquired*/
-#endif
 } tBTM_INQUIRY_VAR_ST;
 
 /* The MSB of the clock offset field indicates whether the offset is valid. */
@@ -354,9 +350,6 @@ typedef struct {
 */
 typedef struct {
   tBTM_ESCO_INFO esco; /* Current settings             */
-#if (BTM_SCO_HCI_INCLUDED == TRUE)
-  fixed_queue_t* xmit_data_q; /* SCO data transmitting queue  */
-#endif
   tBTM_SCO_CB* p_conn_cb; /* Callback for when connected  */
   tBTM_SCO_CB* p_disc_cb; /* Callback for when disconnect */
   uint16_t state;         /* The state of the SCO link    */
@@ -369,9 +362,6 @@ typedef struct {
 /* SCO Management control block */
 typedef struct {
   tBTM_SCO_IND_CBACK* app_sco_ind_cb;
-#if (BTM_SCO_HCI_INCLUDED == TRUE)
-  tBTM_SCO_DATA_CB* p_data_cb; /* Callback for SCO data over HCI */
-#endif
   tSCO_CONN sco_db[BTM_MAX_SCO_LINKS];
   enh_esco_params_t def_esco_parms;
   uint16_t sco_disc_reason;

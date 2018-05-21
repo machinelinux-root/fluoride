@@ -22,12 +22,14 @@ import argparse
 # Must have 'host_supported: true'
 HOST_TESTS = [
   'bluetoothtbd_test',
+  'net_test_avrcp',
+  'net_test_btif_state_machine',
   'net_test_btcore',
   'net_test_types',
+  'net_test_btpackets',
 ]
 
 SOONG_UI_BASH = 'build/soong/soong_ui.bash'
-
 
 def str2bool(argument, default=False):
   """ Convert a string to a booleen value. """

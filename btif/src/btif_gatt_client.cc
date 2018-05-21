@@ -204,7 +204,9 @@ void bta_gattc_cback(tBTA_GATTC_EVT event, tBTA_GATTC* p_data) {
   ASSERTC(status == BT_STATUS_SUCCESS, "Context transfer failed!", status);
 }
 
-void btm_read_rssi_cb(tBTM_RSSI_RESULT* p_result) {
+void btm_read_rssi_cb(void* p_void) {
+  tBTM_RSSI_RESULT* p_result = (tBTM_RSSI_RESULT*)p_void;
+
   if (!p_result) return;
 
   CLI_CBACK_IN_JNI(read_remote_rssi_cb, rssi_request_client_if,
@@ -523,8 +525,8 @@ bt_status_t btif_gattc_read_remote_rssi(int client_if,
   CHECK_BTGATT_INIT();
   rssi_request_client_if = client_if;
 
-  return do_in_jni_thread(Bind(base::IgnoreResult(&BTM_ReadRSSI), bd_addr,
-                               (tBTM_CMPL_CB*)btm_read_rssi_cb));
+  return do_in_jni_thread(
+      Bind(base::IgnoreResult(&BTM_ReadRSSI), bd_addr, btm_read_rssi_cb));
 }
 
 bt_status_t btif_gattc_configure_mtu(int conn_id, int mtu) {
@@ -535,10 +537,11 @@ bt_status_t btif_gattc_configure_mtu(int conn_id, int mtu) {
 
 void btif_gattc_conn_parameter_update_impl(RawAddress addr, int min_interval,
                                            int max_interval, int latency,
-                                           int timeout) {
+                                           int timeout, uint16_t min_ce_len,
+                                           uint16_t max_ce_len) {
   if (BTA_DmGetConnectionState(addr))
     BTA_DmBleUpdateConnectionParams(addr, min_interval, max_interval, latency,
-                                    timeout);
+                                    timeout, min_ce_len, max_ce_len);
   else
     BTA_DmSetBlePrefConnParams(addr, min_interval, max_interval, latency,
                                timeout);
@@ -546,11 +549,13 @@ void btif_gattc_conn_parameter_update_impl(RawAddress addr, int min_interval,
 
 bt_status_t btif_gattc_conn_parameter_update(const RawAddress& bd_addr,
                                              int min_interval, int max_interval,
-                                             int latency, int timeout) {
+                                             int latency, int timeout,
+                                             uint16_t min_ce_len,
+                                             uint16_t max_ce_len) {
   CHECK_BTGATT_INIT();
-  return do_in_jni_thread(
-      Bind(base::IgnoreResult(&btif_gattc_conn_parameter_update_impl), bd_addr,
-           min_interval, max_interval, latency, timeout));
+  return do_in_jni_thread(Bind(
+      base::IgnoreResult(&btif_gattc_conn_parameter_update_impl), bd_addr,
+      min_interval, max_interval, latency, timeout, min_ce_len, max_ce_len));
 }
 
 bt_status_t btif_gattc_set_preferred_phy(const RawAddress& bd_addr,

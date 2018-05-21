@@ -23,11 +23,13 @@ __BEGIN_DECLS
 #define BTSOCK_FLAG_NO_SDP (1 << 2)
 #define BTSOCK_FLAG_AUTH_MITM (1 << 3)
 #define BTSOCK_FLAG_AUTH_16_DIGIT (1 << 4)
+#define BTSOCK_FLAG_LE_COC (1 << 5)
 
 typedef enum {
   BTSOCK_RFCOMM = 1,
   BTSOCK_SCO = 2,
-  BTSOCK_L2CAP = 3
+  BTSOCK_L2CAP = 3,
+  BTSOCK_L2CAP_LE = 4
 } btsock_type_t;
 
 /** Represents the standard BT SOCKET interface. */
@@ -73,6 +75,15 @@ typedef struct {
   bt_status_t (*connect)(const RawAddress* bd_addr, btsock_type_t type,
                          const bluetooth::Uuid* uuid, int channel, int* sock_fd,
                          int flags, int callingUid);
+
+  /**
+   * Set the LE Data Length value to this connected peer to the
+   * maximum supported by this BT controller. This command
+   * suggests to the BT controller to set its maximum transmission
+   * packet size.
+   */
+  void (*request_max_tx_data_length)(const RawAddress& bd_addr);
+
 } btsock_interface_t;
 
 __END_DECLS

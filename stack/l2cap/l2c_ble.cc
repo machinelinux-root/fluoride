@@ -31,6 +31,7 @@
 #include "btu.h"
 #include "device/include/controller.h"
 #include "hcimsgs.h"
+#include "l2c_api.h"
 #include "l2c_int.h"
 #include "l2cdefs.h"
 #include "osi/include/osi.h"
@@ -52,11 +53,19 @@ static void l2cble_start_conn_update(tL2C_LCB* p_lcb);
  *
  ******************************************************************************/
 bool L2CA_CancelBleConnectReq(const RawAddress& rem_bda) {
-  tL2C_LCB* p_lcb;
-
+  tL2C_LCB* p_lcb = l2cu_find_lcb_by_bd_addr(rem_bda, BT_TRANSPORT_LE);
   /* There can be only one BLE connection request outstanding at a time */
   if (btm_ble_get_conn_st() == BLE_CONN_IDLE) {
     L2CAP_TRACE_WARNING("%s - no connection pending", __func__);
+    tACL_CONN* p_acl = btm_bda_to_acl(rem_bda, BT_TRANSPORT_LE);
+    if (p_acl) {
+      if (p_lcb != NULL &&
+          p_lcb->link_state == LST_CONNECTING && !l2cb.is_ble_connecting) {
+        L2CAP_TRACE_WARNING("%s - disconnecting the LE link", __func__);
+        L2CA_RemoveFixedChnl(L2CAP_ATT_CID, rem_bda);
+        return (true);
+      }
+    }
     return (false);
   }
 
@@ -71,7 +80,6 @@ bool L2CA_CancelBleConnectReq(const RawAddress& rem_bda) {
 
   btsnd_hcic_ble_create_conn_cancel();
 
-  p_lcb = l2cu_find_lcb_by_bd_addr(rem_bda, BT_TRANSPORT_LE);
   /* Do not remove lcb if an LE link is already up as a peripheral */
   if (p_lcb != NULL &&
       !(p_lcb->link_role == HCI_ROLE_SLAVE &&
@@ -98,7 +106,8 @@ bool L2CA_CancelBleConnectReq(const RawAddress& rem_bda) {
  ******************************************************************************/
 bool L2CA_UpdateBleConnParams(const RawAddress& rem_bda, uint16_t min_int,
                               uint16_t max_int, uint16_t latency,
-                              uint16_t timeout) {
+                              uint16_t timeout, uint16_t min_ce_len,
+                              uint16_t max_ce_len) {
   tL2C_LCB* p_lcb;
   tACL_CONN* p_acl_cb = btm_bda_to_acl(rem_bda, BT_TRANSPORT_LE);
 
@@ -116,15 +125,28 @@ bool L2CA_UpdateBleConnParams(const RawAddress& rem_bda, uint16_t min_int,
     return (false);
   }
 
+  VLOG(2) << __func__ << ": BD_ADDR=" << rem_bda << ", min_int=" << min_int
+          << ", max_int=" << max_int << ", min_ce_len=" << min_ce_len
+          << ", max_ce_len=" << max_ce_len;
+
   p_lcb->min_interval = min_int;
   p_lcb->max_interval = max_int;
   p_lcb->latency = latency;
   p_lcb->timeout = timeout;
   p_lcb->conn_update_mask |= L2C_BLE_NEW_CONN_PARAM;
+  p_lcb->min_ce_len = min_ce_len;
+  p_lcb->max_ce_len = max_ce_len;
 
   l2cble_start_conn_update(p_lcb);
 
   return (true);
+}
+
+bool L2CA_UpdateBleConnParams(const RawAddress& rem_bda, uint16_t min_int,
+                              uint16_t max_int, uint16_t latency,
+                              uint16_t timeout) {
+  return L2CA_UpdateBleConnParams(rem_bda, min_int, max_int, latency, timeout,
+                                  0, 0);
 }
 
 /*******************************************************************************
@@ -503,7 +525,8 @@ static void l2cble_start_conn_update(tL2C_LCB* p_lcb) {
               ) {
         btsnd_hcic_ble_upd_ll_conn_params(p_lcb->handle, p_lcb->min_interval,
                                           p_lcb->max_interval, p_lcb->latency,
-                                          p_lcb->timeout, 0, 0);
+                                          p_lcb->timeout, p_lcb->min_ce_len,
+                                          p_lcb->max_ce_len);
         p_lcb->conn_update_mask |= L2C_BLE_UPDATE_PENDING;
       } else {
         l2cu_send_peer_ble_par_req(p_lcb, p_lcb->min_interval,
@@ -604,15 +627,23 @@ void l2cble_process_sig_cmd(tL2C_LCB* p_lcb, uint8_t* p, uint16_t pkt_len) {
       STREAM_TO_UINT16(timeout, p);      /* 0x000A - 0x0C80 */
       /* If we are a master, the slave wants to update the parameters */
       if (p_lcb->link_role == HCI_ROLE_MASTER) {
-        if (min_interval < BTM_BLE_CONN_INT_MIN_LIMIT)
+        if (min_interval < BTM_BLE_CONN_INT_MIN_LIMIT) {
+          L2CAP_TRACE_DEBUG(
+              "%s: requested min_interval=%d too small. Set to %d", __func__,
+              min_interval, BTM_BLE_CONN_INT_MIN_LIMIT);
           min_interval = BTM_BLE_CONN_INT_MIN_LIMIT;
+        }
 
         // While this could result in connection parameters that fall
         // outside fo the range requested, this will allow the connection
         // to remain established.
         // In other words, this is a workaround for certain peripherals.
-        if (max_interval < BTM_BLE_CONN_INT_MIN_LIMIT)
+        if (max_interval < BTM_BLE_CONN_INT_MIN_LIMIT) {
+          L2CAP_TRACE_DEBUG(
+              "%s: requested max_interval=%d too small. Set to %d", __func__,
+              max_interval, BTM_BLE_CONN_INT_MIN_LIMIT);
           max_interval = BTM_BLE_CONN_INT_MIN_LIMIT;
+        }
 
         if (min_interval < BTM_BLE_CONN_INT_MIN ||
             min_interval > BTM_BLE_CONN_INT_MAX ||
@@ -1321,7 +1352,8 @@ void l2cble_sec_comp(const RawAddress* bda, tBT_TRANSPORT transport,
   uint8_t sec_act;
 
   if (!p_lcb) {
-    L2CAP_TRACE_WARNING("%s security complete for unknown device", __func__);
+    L2CAP_TRACE_WARNING("%s: security complete for unknown device. bda=%s",
+                        __func__, bda->ToString().c_str());
     return;
   }
 

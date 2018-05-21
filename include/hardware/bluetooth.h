@@ -22,8 +22,9 @@
 #include <sys/cdefs.h>
 #include <sys/types.h>
 
-#include <bluetooth/uuid.h>
-#include <raw_address.h>
+#include "avrcp/avrcp.h"
+#include "bluetooth/uuid.h"
+#include "raw_address.h"
 
 /**
  * The Bluetooth Hardware Module ID
@@ -33,7 +34,6 @@
 #define BT_STACK_MODULE_ID "bluetooth"
 
 /** Bluetooth profile interface IDs */
-
 #define BT_PROFILE_HANDSFREE_ID "handsfree"
 #define BT_PROFILE_HANDSFREE_CLIENT_ID "handsfree_client"
 #define BT_PROFILE_ADVANCED_AUDIO_ID "a2dp"
@@ -48,6 +48,7 @@
 #define BT_PROFILE_GATT_ID "gatt"
 #define BT_PROFILE_AV_RC_ID "avrcp"
 #define BT_PROFILE_AV_RC_CTRL_ID "avrcp_ctrl"
+#define BT_PROFILE_HEARING_AID_ID "hearing_aid"
 
 /** Bluetooth test interface IDs */
 #define BT_TEST_INTERFACE_MCAP_ID "mcap_test"
@@ -64,6 +65,18 @@ typedef enum {
 
 /** Bluetooth Adapter State */
 typedef enum { BT_STATE_OFF, BT_STATE_ON } bt_state_t;
+
+/** Bluetooth Adapter Input Output Capabilities which determine Pairing/Security
+ */
+typedef enum {
+  BT_IO_CAP_OUT,    /* DisplayOnly */
+  BT_IO_CAP_IO,     /* DisplayYesNo */
+  BT_IO_CAP_IN,     /* KeyboardOnly */
+  BT_IO_CAP_NONE,   /* NoInputNoOutput */
+  BT_IO_CAP_KBDISP, /* Keyboard display */
+  BT_IO_CAP_MAX,
+  BT_IO_CAP_UNKNOWN = 0xFF /* Unknown value */
+} bt_io_cap_t;
 
 /** Bluetooth Error Status */
 /** We need to build on this */
@@ -238,6 +251,20 @@ typedef enum {
    * Data type   - bt_local_le_features_t.
    */
   BT_PROPERTY_LOCAL_LE_FEATURES,
+
+  /**
+   * Description - Local Input/Output Capabilities for classic Bluetooth
+   * Access mode - GET and SET
+   * Data Type - bt_io_cap_t.
+   */
+  BT_PROPERTY_LOCAL_IO_CAPS,
+
+  /**
+   * Description - Local Input/Output Capabilities for BLE
+   * Access mode - GET and SET
+   * Data Type - bt_io_cap_t.
+   */
+  BT_PROPERTY_LOCAL_IO_CAPS_BLE,
 
   BT_PROPERTY_REMOTE_DEVICE_TIMESTAMP = 0xFF,
 } bt_property_type_t;
@@ -559,6 +586,14 @@ typedef struct {
   void (*dump)(int fd, const char** arguments);
 
   /**
+   * Native support for metrics protobuf dumping. The dumping format will be
+   * raw byte array
+   *
+   * @param output an externally allocated string to dump serialized protobuf
+   */
+  void (*dumpMetrics)(std::string* output);
+
+  /**
    * Clear /data/misc/bt_config.conf and erase all stored connections
    */
   int (*config_clear)(void);
@@ -576,6 +611,11 @@ typedef struct {
    */
   void (*interop_database_add)(uint16_t feature, const RawAddress* addr,
                                size_t len);
+
+  /**
+   * Get the AvrcpTarget Service interface to interact with the Avrcp Service
+   */
+  bluetooth::avrcp::ServiceInterface* (*get_avrcp_service)(void);
 } bt_interface_t;
 
 #define BLUETOOTH_INTERFACE_STRING "bluetoothInterface"

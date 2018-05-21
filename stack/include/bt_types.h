@@ -352,6 +352,17 @@ typedef struct {
              ((((uint32_t)(*((p) + 3)))) << 24));                     \
     (p) += 4;                                                         \
   }
+#define STREAM_TO_UINT64(u64, p)                                      \
+  {                                                                   \
+    (u64) = (((uint64_t)(*(p))) + ((((uint64_t)(*((p) + 1)))) << 8) + \
+             ((((uint64_t)(*((p) + 2)))) << 16) +                     \
+             ((((uint64_t)(*((p) + 3)))) << 24) +                     \
+             ((((uint64_t)(*((p) + 4)))) << 32) +                     \
+             ((((uint64_t)(*((p) + 5)))) << 40) +                     \
+             ((((uint64_t)(*((p) + 6)))) << 48) +                     \
+             ((((uint64_t)(*((p) + 7)))) << 56));                     \
+    (p) += 8;                                                         \
+  }
 #define STREAM_TO_ARRAY32(a, p)                     \
   {                                                 \
     int ijk;                                        \
@@ -712,6 +723,7 @@ typedef struct {
 #define BLE_ADDR_RANDOM 0x01
 #define BLE_ADDR_PUBLIC_ID 0x02
 #define BLE_ADDR_RANDOM_ID 0x03
+#define BLE_ADDR_ANONYMOUS 0xFF
 typedef uint8_t tBLE_ADDR_TYPE;
 #define BLE_ADDR_TYPE_MASK (BLE_ADDR_RANDOM | BLE_ADDR_PUBLIC)
 

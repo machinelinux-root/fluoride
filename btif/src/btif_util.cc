@@ -210,6 +210,7 @@ const char* dump_hf_event(uint16_t event) {
     CASE_RETURN_STR(BTA_AG_AT_BCS_EVT)
     CASE_RETURN_STR(BTA_AG_AT_BIND_EVT)
     CASE_RETURN_STR(BTA_AG_AT_BIEV_EVT)
+    CASE_RETURN_STR(BTA_AG_AT_BIA_EVT)
 
     default:
       return "UNKNOWN MSG ID";
@@ -268,18 +269,6 @@ const char* dump_hh_event(uint16_t event) {
   }
 }
 
-const char* dump_hf_conn_state(uint16_t event) {
-  switch (event) {
-    CASE_RETURN_STR(BTHF_CONNECTION_STATE_DISCONNECTED)
-    CASE_RETURN_STR(BTHF_CONNECTION_STATE_CONNECTING)
-    CASE_RETURN_STR(BTHF_CONNECTION_STATE_CONNECTED)
-    CASE_RETURN_STR(BTHF_CONNECTION_STATE_SLC_CONNECTED)
-    CASE_RETURN_STR(BTHF_CONNECTION_STATE_DISCONNECTING)
-    default:
-      return "UNKNOWN MSG ID";
-  }
-}
-
 const char* dump_hd_event(uint16_t event) {
   switch (event) {
     CASE_RETURN_STR(BTA_HD_ENABLE_EVT)
@@ -300,20 +289,6 @@ const char* dump_hd_event(uint16_t event) {
   }
 }
 
-const char* dump_hf_call_state(bthf_call_state_t call_state) {
-  switch (call_state) {
-    CASE_RETURN_STR(BTHF_CALL_STATE_IDLE)
-    CASE_RETURN_STR(BTHF_CALL_STATE_HELD)
-    CASE_RETURN_STR(BTHF_CALL_STATE_DIALING)
-    CASE_RETURN_STR(BTHF_CALL_STATE_ALERTING)
-    CASE_RETURN_STR(BTHF_CALL_STATE_INCOMING)
-    CASE_RETURN_STR(BTHF_CALL_STATE_WAITING)
-    CASE_RETURN_STR(BTHF_CALL_STATE_ACTIVE)
-    default:
-      return "UNKNOWN CALL STATE";
-  }
-}
-
 const char* dump_thread_evt(bt_cb_thread_evt evt) {
   switch (evt) {
     CASE_RETURN_STR(ASSOCIATE_JVM)
@@ -321,17 +296,6 @@ const char* dump_thread_evt(bt_cb_thread_evt evt) {
 
     default:
       return "unknown thread evt";
-  }
-}
-
-const char* dump_hf_audio_state(uint16_t event) {
-  switch (event) {
-    CASE_RETURN_STR(BTHF_AUDIO_STATE_DISCONNECTED)
-    CASE_RETURN_STR(BTHF_AUDIO_STATE_CONNECTING)
-    CASE_RETURN_STR(BTHF_AUDIO_STATE_CONNECTED)
-    CASE_RETURN_STR(BTHF_AUDIO_STATE_DISCONNECTING)
-    default:
-      return "UNKNOWN MSG ID";
   }
 }
 

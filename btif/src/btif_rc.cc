@@ -42,12 +42,14 @@
 #include "bta_av_api.h"
 #include "btif_av.h"
 #include "btif_common.h"
+#include "btif_rc.h"
 #include "btif_util.h"
 #include "btu.h"
 #include "device/include/interop.h"
 #include "osi/include/list.h"
 #include "osi/include/osi.h"
 #include "osi/include/properties.h"
+
 #define RC_INVALID_TRACK_ID (0xFFFFFFFFFFFFFFFFULL)
 
 /*****************************************************************************
@@ -319,7 +321,7 @@ void get_folder_item_type_folder(const tAVRC_ITEM* avrc_item,
 void get_folder_item_type_player(const tAVRC_ITEM* avrc_item,
                                  btrc_folder_items_t* btrc_item);
 static bt_status_t get_folder_items_cmd(RawAddress* bd_addr, uint8_t scope,
-                                        uint8_t start_item, uint8_t num_items);
+                                        uint32_t start_item, uint32_t end_item);
 
 static void btif_rc_upstreams_evt(uint16_t event, tAVRC_COMMAND* p_param,
                                   uint8_t ctype, uint8_t label,
@@ -347,7 +349,6 @@ static btrc_ctrl_callbacks_t* bt_rc_ctrl_callbacks = NULL;
 /*****************************************************************************
  *  Externs
  *****************************************************************************/
-extern bool btif_hf_call_terminated_recently();
 extern bool check_cod(const RawAddress* remote_bdaddr, uint32_t cod);
 
 /*****************************************************************************
@@ -490,13 +491,21 @@ void handle_rc_features(btif_rc_device_cb_t* p_dev) {
   CHECK(bt_rc_callbacks);
 
   btrc_remote_features_t rc_features = BTRC_FEAT_NONE;
-  RawAddress avdtp_addr = btif_av_get_addr();
+  RawAddress avdtp_source_active_peer_addr = btif_av_source_active_peer();
+  RawAddress avdtp_sink_active_peer_addr = btif_av_sink_active_peer();
 
-  BTIF_TRACE_DEBUG("%s: AVDTP Address: %s AVCTP address: %s", __func__,
-                   avdtp_addr.ToString().c_str(), rc_addr.ToString().c_str());
+  BTIF_TRACE_DEBUG(
+      "%s: AVDTP Source Active Peer Address: %s "
+      "AVDTP Sink Active Peer Address: %s "
+      "AVCTP address: %s",
+      __func__, avdtp_source_active_peer_addr.ToString().c_str(),
+      avdtp_sink_active_peer_addr.ToString().c_str(),
+      rc_addr.ToString().c_str());
 
   if (interop_match_addr(INTEROP_DISABLE_ABSOLUTE_VOLUME, &rc_addr) ||
-      absolute_volume_disabled() || avdtp_addr != rc_addr) {
+      absolute_volume_disabled() ||
+      (avdtp_source_active_peer_addr != rc_addr &&
+       avdtp_sink_active_peer_addr != rc_addr)) {
     p_dev->rc_features &= ~BTA_AV_FEAT_ADV_CTRL;
   }
 
@@ -1073,18 +1082,11 @@ void btif_rc_handler(tBTA_AV_EVT event, tBTA_AV* p_data) {
   }
 }
 
-/***************************************************************************
- **
- ** Function       btif_rc_get_connected_peer
- **
- ** Description    Fetches the connected headset's address if any
- **
- ***************************************************************************/
-bool btif_rc_get_connected_peer(RawAddress* peer_addr) {
+bool btif_rc_is_connected_peer(const RawAddress& peer_addr) {
   for (int idx = 0; idx < BTIF_RC_NUM_CONN; idx++) {
     btif_rc_device_cb_t* p_dev = get_connected_device(idx);
-    if (p_dev != NULL && (p_dev->rc_connected == TRUE)) {
-      *peer_addr = p_dev->rc_addr;
+    if (p_dev != NULL && (p_dev->rc_connected == TRUE) &&
+        peer_addr == p_dev->rc_addr) {
       return true;
     }
   }
@@ -2497,15 +2499,9 @@ static bt_status_t get_total_num_of_items_rsp(RawAddress* bd_addr,
 static bt_status_t set_volume(uint8_t volume) {
   BTIF_TRACE_DEBUG("%s: volume: %d", __func__, volume);
   tAVRC_STS status = BT_STATUS_UNSUPPORTED;
-  rc_transaction_t* p_transaction = NULL;
 
   for (int idx = 0; idx < BTIF_RC_NUM_CONN; idx++) {
-    if (!btif_rc_cb.rc_multi_cb[idx].rc_connected) {
-      status = BT_STATUS_NOT_READY;
-      BTIF_TRACE_ERROR("%s: RC is not connected for device: 0x%x", __func__,
-                       btif_rc_cb.rc_multi_cb[idx].rc_addr);
-      continue;
-    }
+    if (!btif_rc_cb.rc_multi_cb[idx].rc_connected) continue;
 
     if (btif_rc_cb.rc_multi_cb[idx].rc_volume == volume) {
       status = BT_STATUS_DONE;
@@ -2514,49 +2510,54 @@ static bt_status_t set_volume(uint8_t volume) {
       continue;
     }
 
-    if ((btif_rc_cb.rc_multi_cb[idx].rc_volume != volume) &&
-        btif_rc_cb.rc_multi_cb[idx].rc_state ==
+    if ((btif_rc_cb.rc_multi_cb[idx].rc_volume == volume) ||
+        btif_rc_cb.rc_multi_cb[idx].rc_state !=
             BTRC_CONNECTION_STATE_CONNECTED) {
-      if ((btif_rc_cb.rc_multi_cb[idx].rc_features & BTA_AV_FEAT_RCTG) == 0) {
-        status = BT_STATUS_NOT_READY;
-        continue;
-      } else {
-        tAVRC_COMMAND avrc_cmd = {0};
-        BT_HDR* p_msg = NULL;
-
-        if (btif_rc_cb.rc_multi_cb[idx].rc_features & BTA_AV_FEAT_ADV_CTRL) {
-          BTIF_TRACE_DEBUG("%s: Peer supports absolute volume. newVolume: %d",
-                           __func__, volume);
-          avrc_cmd.volume.opcode = AVRC_OP_VENDOR;
-          avrc_cmd.volume.pdu = AVRC_PDU_SET_ABSOLUTE_VOLUME;
-          avrc_cmd.volume.status = AVRC_STS_NO_ERROR;
-          avrc_cmd.volume.volume = volume;
-
-          if (AVRC_BldCommand(&avrc_cmd, &p_msg) == AVRC_STS_NO_ERROR) {
-            bt_status_t tran_status = get_transaction(&p_transaction);
-
-            if (BT_STATUS_SUCCESS == tran_status && NULL != p_transaction) {
-              BTIF_TRACE_DEBUG("%s: msgreq being sent out with label: %d",
-                               __func__, p_transaction->lbl);
-              BTA_AvMetaCmd(btif_rc_cb.rc_multi_cb[idx].rc_handle,
-                            p_transaction->lbl, AVRC_CMD_CTRL, p_msg);
-              status = BT_STATUS_SUCCESS;
-            } else {
-              osi_free_and_reset((void**)&p_msg);
-              BTIF_TRACE_ERROR(
-                  "%s: failed to obtain transaction details. status: 0x%02x",
-                  __func__, tran_status);
-              status = BT_STATUS_FAIL;
-            }
-          } else {
-            BTIF_TRACE_ERROR(
-                "%s: failed to build absolute volume command. status: 0x%02x",
-                __func__, status);
-            status = BT_STATUS_FAIL;
-          }
-        }
-      }
+      continue;
     }
+
+    if ((btif_rc_cb.rc_multi_cb[idx].rc_features & BTA_AV_FEAT_RCTG) == 0) {
+      status = BT_STATUS_NOT_READY;
+      continue;
+    }
+
+    if (!(btif_rc_cb.rc_multi_cb[idx].rc_features & BTA_AV_FEAT_ADV_CTRL))
+      continue;
+
+    BTIF_TRACE_DEBUG("%s: Peer supports absolute volume. newVolume: %d",
+                     __func__, volume);
+
+    tAVRC_COMMAND avrc_cmd = {.volume = {.opcode = AVRC_OP_VENDOR,
+                                         .pdu = AVRC_PDU_SET_ABSOLUTE_VOLUME,
+                                         .status = AVRC_STS_NO_ERROR,
+                                         .volume = volume}};
+
+    BT_HDR* p_msg = NULL;
+    if (AVRC_BldCommand(&avrc_cmd, &p_msg) != AVRC_STS_NO_ERROR) {
+      BTIF_TRACE_ERROR(
+          "%s: failed to build absolute volume command. status: 0x%02x",
+          __func__, status);
+      status = BT_STATUS_FAIL;
+      continue;
+    }
+
+    rc_transaction_t* p_transaction = NULL;
+    bt_status_t tran_status = get_transaction(&p_transaction);
+
+    if (tran_status != BT_STATUS_SUCCESS || !p_transaction) {
+      osi_free_and_reset((void**)&p_msg);
+      BTIF_TRACE_ERROR(
+          "%s: failed to obtain transaction details. status: 0x%02x", __func__,
+          tran_status);
+      status = BT_STATUS_FAIL;
+      continue;
+    }
+
+    BTIF_TRACE_DEBUG("%s: msgreq being sent out with label: %d", __func__,
+                     p_transaction->lbl);
+    BTA_AvMetaCmd(btif_rc_cb.rc_multi_cb[idx].rc_handle, p_transaction->lbl,
+                  AVRC_CMD_CTRL, p_msg);
+    status = BT_STATUS_SUCCESS;
   }
   return (bt_status_t)status;
 }
@@ -3111,6 +3112,7 @@ static void handle_get_capability_response(tBTA_AV_META_MSG* pmeta_msg,
       if ((p_rsp->param.event_id[xx] == AVRC_EVT_PLAY_STATUS_CHANGE) ||
           (p_rsp->param.event_id[xx] == AVRC_EVT_TRACK_CHANGE) ||
           (p_rsp->param.event_id[xx] == AVRC_EVT_APP_SETTING_CHANGE) ||
+          (p_rsp->param.event_id[xx] == AVRC_EVT_ADDR_PLAYER_CHANGE) ||
           (p_rsp->param.event_id[xx] == AVRC_EVT_UIDS_CHANGE)) {
         p_event = (btif_rc_supported_event_t*)osi_malloc(
             sizeof(btif_rc_supported_event_t));
@@ -3119,6 +3121,15 @@ static void handle_get_capability_response(tBTA_AV_META_MSG* pmeta_msg,
         list_append(p_dev->rc_supported_event_list, p_event);
       }
     }
+
+    // On occasion a remote device can intermittently send a poorly configured
+    // packet with 0 capabilities. This check ensures the stack does not crash.
+    // Typically the remote device will send a proper packet in the future and
+    // continue operation.
+    if (list_is_empty(p_dev->rc_supported_event_list)) {
+      return;
+    }
+
     p_event =
         (btif_rc_supported_event_t*)list_front(p_dev->rc_supported_event_list);
     if (p_event != NULL) {
@@ -3190,7 +3201,9 @@ static void handle_notification_response(tBTA_AV_META_MSG* pmeta_msg,
         /* Start timer to get play status periodically
          * if the play state is playing.
          */
-        if (p_rsp->param.play_status == AVRC_PLAYSTATE_PLAYING) {
+        if (p_rsp->param.play_status == AVRC_PLAYSTATE_PLAYING ||
+            p_rsp->param.play_status == AVRC_PLAYSTATE_REV_SEEK ||
+            p_rsp->param.play_status == AVRC_PLAYSTATE_FWD_SEEK) {
           rc_start_play_status_timer(p_dev);
         }
         HAL_CBACK(bt_rc_ctrl_callbacks, play_status_changed_cb, &rc_addr,
@@ -3219,6 +3232,8 @@ static void handle_notification_response(tBTA_AV_META_MSG* pmeta_msg,
         break;
 
       case AVRC_EVT_ADDR_PLAYER_CHANGE:
+        HAL_CBACK(bt_rc_ctrl_callbacks, set_addressed_player_cb, &rc_addr,
+                  BTRC_STS_ADDR_PLAY_CHGD);
         break;
 
       case AVRC_EVT_UIDS_CHANGE:
@@ -3879,6 +3894,10 @@ static void handle_get_folder_items_response(tBTA_AV_META_MSG* pmeta_msg,
       switch (avrc_item->item_type) {
         case AVRC_ITEM_MEDIA:
           BTIF_TRACE_DEBUG("%s setting type to %d", __func__, BTRC_ITEM_MEDIA);
+          /* Allocate Space for Attributes */
+          btrc_item->media.num_attrs = avrc_item->u.media.attr_count;
+          btrc_item->media.p_attrs = (btrc_element_attr_val_t*)osi_malloc(
+              btrc_item->media.num_attrs * sizeof(btrc_element_attr_val_t));
           get_folder_item_type_media(avrc_item, btrc_item);
           break;
 
@@ -3904,7 +3923,22 @@ static void handle_get_folder_items_response(tBTA_AV_META_MSG* pmeta_msg,
               (const btrc_folder_items_t*)btrc_items, item_count);
     BTIF_TRACE_DEBUG("%s HAL CBACK get_folder_items_cb finished", __func__);
 
-    /* Release the memory block for items since we OWN the object */
+    /* Release the memory block for items and attributes allocated here */
+    for (uint8_t i = 0; i < item_count; i++) {
+      btrc_folder_items_t* btrc_item = &(btrc_items[i]);
+      switch (btrc_item->item_type) {
+        case BTRC_ITEM_MEDIA:
+          osi_free(btrc_item->media.p_attrs);
+          break;
+        case BTRC_ITEM_PLAYER:
+        case BTRC_ITEM_FOLDER:
+          /*Nothing to free*/
+          break;
+        default:
+          BTIF_TRACE_WARNING("%s free unspecified type", __func__);
+      }
+    }
+
     osi_free(btrc_items);
   } else {
     BTIF_TRACE_ERROR("%s: Error %d", __func__, p_rsp->status);
@@ -3951,11 +3985,6 @@ void get_folder_item_type_media(const tAVRC_ITEM* avrc_item,
   memset(btrc_item_media->name, 0, BTRC_MAX_ATTR_STR_LEN * sizeof(uint8_t));
   memcpy(btrc_item_media->name, avrc_item_media->name.p_str,
          sizeof(uint8_t) * (avrc_item_media->name.str_len));
-
-  /* Copy the parameters */
-  btrc_item_media->num_attrs = avrc_item_media->attr_count;
-  btrc_item_media->p_attrs = (btrc_element_attr_val_t*)osi_malloc(
-      btrc_item_media->num_attrs * sizeof(btrc_element_attr_val_t));
 
   /* Extract each attribute */
   for (int i = 0; i < avrc_item_media->attr_count; i++) {
@@ -4077,6 +4106,8 @@ void get_folder_item_type_player(const tAVRC_ITEM* avrc_item,
   btrc_item_player->major_type = avrc_item_player->major_type;
   /* Sub type */
   btrc_item_player->sub_type = avrc_item_player->sub_type;
+  /* Play status */
+  btrc_item_player->play_status = avrc_item_player->play_status;
   /* Features */
   memcpy(btrc_item_player->features, avrc_item_player->features,
          BTRC_FEATURE_BIT_MASK_SIZE);
@@ -4485,18 +4516,18 @@ static bt_status_t get_playback_state_cmd(RawAddress* bd_addr) {
  * Description      Fetch the now playing list
  *
  * Paramters        start_item: First item to fetch (0 to fetch from beganning)
- *                  end_item: Last item to fetch (0xff to fetch until end)
+ *                  end_item: Last item to fetch (0xffffffff to fetch until end)
  *
  * Returns          BT_STATUS_SUCCESS if command issued successfully otherwise
  *                  BT_STATUS_FAIL.
  *
  **************************************************************************/
 static bt_status_t get_now_playing_list_cmd(RawAddress* bd_addr,
-                                            uint8_t start_item,
-                                            uint8_t num_items) {
-  BTIF_TRACE_DEBUG("%s start, end: (%d, %d)", __func__, start_item, num_items);
+                                            uint32_t start_item,
+                                            uint32_t end_item) {
+  BTIF_TRACE_DEBUG("%s start, end: (%d, %d)", __func__, start_item, end_item);
   return get_folder_items_cmd(bd_addr, AVRC_SCOPE_NOW_PLAYING, start_item,
-                              num_items);
+                              end_item);
 }
 
 /***************************************************************************
@@ -4506,17 +4537,17 @@ static bt_status_t get_now_playing_list_cmd(RawAddress* bd_addr,
  * Description      Fetch the currently selected folder list
  *
  * Paramters        start_item: First item to fetch (0 to fetch from beganning)
- *                  end_item: Last item to fetch (0xff to fetch until end)
+ *                  end_item: Last item to fetch (0xffffffff to fetch until end)
  *
  * Returns          BT_STATUS_SUCCESS if command issued successfully otherwise
  *                  BT_STATUS_FAIL.
  *
  **************************************************************************/
-static bt_status_t get_folder_list_cmd(RawAddress* bd_addr, uint8_t start_item,
-                                       uint8_t num_items) {
-  BTIF_TRACE_DEBUG("%s start, end: (%d, %d)", __func__, start_item, num_items);
+static bt_status_t get_folder_list_cmd(RawAddress* bd_addr, uint32_t start_item,
+                                       uint32_t end_item) {
+  BTIF_TRACE_DEBUG("%s start, end: (%d, %d)", __func__, start_item, end_item);
   return get_folder_items_cmd(bd_addr, AVRC_SCOPE_FILE_SYSTEM, start_item,
-                              num_items);
+                              end_item);
 }
 
 /***************************************************************************
@@ -4526,17 +4557,17 @@ static bt_status_t get_folder_list_cmd(RawAddress* bd_addr, uint8_t start_item,
  * Description      Fetch the player list
  *
  * Paramters        start_item: First item to fetch (0 to fetch from beganning)
- *                  end_item: Last item to fetch (0xff to fetch until end)
+ *                  end_item: Last item to fetch (0xffffffff to fetch until end)
  *
  * Returns          BT_STATUS_SUCCESS if command issued successfully otherwise
  *                  BT_STATUS_FAIL.
  *
  **************************************************************************/
-static bt_status_t get_player_list_cmd(RawAddress* bd_addr, uint8_t start_item,
-                                       uint8_t num_items) {
-  BTIF_TRACE_DEBUG("%s start, end: (%d, %d)", __func__, start_item, num_items);
+static bt_status_t get_player_list_cmd(RawAddress* bd_addr, uint32_t start_item,
+                                       uint32_t end_item) {
+  BTIF_TRACE_DEBUG("%s start, end: (%d, %d)", __func__, start_item, end_item);
   return get_folder_items_cmd(bd_addr, AVRC_SCOPE_PLAYER_LIST, start_item,
-                              num_items);
+                              end_item);
 }
 
 /***************************************************************************
@@ -4548,7 +4579,7 @@ static bt_status_t get_player_list_cmd(RawAddress* bd_addr, uint8_t start_item,
  * Paramters        direction: Direction (Up/Down) to change folder
  *                  uid: The UID of folder to move to
  *                  start_item: First item to fetch (0 to fetch from beganning)
- *                  end_item: Last item to fetch (0xff to fetch until end)
+ *                  end_item: Last item to fetch (0xffffffff to fetch until end)
  *
  * Returns          BT_STATUS_SUCCESS if command issued successfully otherwise
  *                  BT_STATUS_FAIL.
@@ -4700,14 +4731,15 @@ static bt_status_t set_addressed_player_cmd(RawAddress* bd_addr, uint16_t id) {
  * Paramters        scope: AVRC_SCOPE_NOW_PLAYING (etc) for various browseable
  *                  content
  *                  start_item: First item to fetch (0 to fetch from beganning)
- *                  end_item: Last item to fetch (0xff to fetch until end)
+ *                  end_item: Last item to fetch (0xffff to fetch until end)
  *
  * Returns          BT_STATUS_SUCCESS if command issued successfully otherwise
  *                  BT_STATUS_FAIL.
  *
  **************************************************************************/
 static bt_status_t get_folder_items_cmd(RawAddress* bd_addr, uint8_t scope,
-                                        uint8_t start_item, uint8_t end_item) {
+                                        uint32_t start_item,
+                                        uint32_t end_item) {
   /* Check that both avrcp and browse channel are connected. */
   btif_rc_device_cb_t* p_dev = btif_rc_get_device_by_bda(bd_addr);
   BTIF_TRACE_DEBUG("%s", __func__);
@@ -5206,7 +5238,7 @@ const btrc_ctrl_interface_t* btif_rc_ctrl_get_interface(void) {
  *      Returns          void
  ******************************************************************************/
 static void initialize_transaction(int lbl) {
-  std::unique_lock<std::recursive_mutex>(device.lbllock);
+  std::unique_lock<std::recursive_mutex> lock(device.lbllock);
   if (lbl < MAX_TRANSACTIONS_PER_SESSION) {
     if (alarm_is_scheduled(device.transaction[lbl].txn_timer)) {
       clear_cmd_timeout(lbl);

@@ -299,8 +299,11 @@ static void l2c_csm_orig_w4_sec_comp(tL2C_CCB* p_ccb, uint16_t event,
   tL2CA_CONNECT_CFM_CB* connect_cfm = p_ccb->p_rcb->api.pL2CA_ConnectCfm_Cb;
   uint16_t local_cid = p_ccb->local_cid;
 
-  L2CAP_TRACE_EVENT("L2CAP - LCID: 0x%04x  st: ORIG_W4_SEC_COMP  evt: %s",
-                    p_ccb->local_cid, l2c_csm_get_event_name(event));
+  L2CAP_TRACE_EVENT(
+      "%s: %sL2CAP - LCID: 0x%04x  st: ORIG_W4_SEC_COMP  evt: %s", __func__,
+      ((p_ccb->p_lcb) && (p_ccb->p_lcb->transport == BT_TRANSPORT_LE)) ? "LE "
+                                                                       : "",
+      p_ccb->local_cid, l2c_csm_get_event_name(event));
 
   switch (event) {
     case L2CEVT_LP_DISCONNECT_IND: /* Link was disconnected */
@@ -548,16 +551,16 @@ static void l2c_csm_w4_l2cap_connect_rsp(tL2C_CCB* p_ccb, uint16_t event,
       break;
 
     case L2CEVT_L2CAP_CONNECT_RSP_NEG: /* Peer rejected connection */
-      L2CAP_TRACE_API(
-          "L2CAP - Calling Connect_Cfm_Cb(), CID: 0x%04x, Failure Code: %d",
-          p_ccb->local_cid, p_ci->l2cap_result);
+      LOG(WARNING) << __func__ << ": L2CAP connection rejected, lcid="
+                   << loghex(p_ccb->local_cid)
+                   << ", reason=" << loghex(p_ci->l2cap_result);
       l2cu_release_ccb(p_ccb);
       (*connect_cfm)(local_cid, p_ci->l2cap_result);
       break;
 
     case L2CEVT_TIMEOUT:
-      L2CAP_TRACE_API("L2CAP - Calling Connect_Cfm_Cb(), CID: 0x%04x, Timeout",
-                      p_ccb->local_cid);
+      LOG(WARNING) << __func__ << ": L2CAP connection timeout, lcid="
+                   << loghex(p_ccb->local_cid);
       l2cu_release_ccb(p_ccb);
       (*connect_cfm)(local_cid, L2CAP_CONN_TIMEOUT);
       break;
@@ -1105,13 +1108,19 @@ static void l2c_csm_open(tL2C_CCB* p_ccb, uint16_t event, void* p_data) {
     case L2CEVT_L2CAP_RECV_FLOW_CONTROL_CREDIT:
       credit = (uint16_t*)p_data;
       L2CAP_TRACE_DEBUG("%s Credits received %d", __func__, *credit);
-      if ((p_ccb->peer_conn_cfg.credits + *credit) > L2CAP_LE_MAX_CREDIT) {
+      if ((p_ccb->peer_conn_cfg.credits + *credit) > L2CAP_LE_CREDIT_MAX) {
         /* we have received credits more than max coc credits,
          * so disconnecting the Le Coc Channel
          */
         l2cble_send_peer_disc_req(p_ccb);
       } else {
         p_ccb->peer_conn_cfg.credits += *credit;
+
+        tL2CA_CREDITS_RECEIVED_CB* cr_cb =
+            p_ccb->p_rcb->api.pL2CA_CreditsReceived_Cb;
+        if (p_ccb->p_lcb->transport == BT_TRANSPORT_LE && (cr_cb)) {
+          (*cr_cb)(p_ccb->local_cid, *credit, p_ccb->peer_conn_cfg.credits);
+        }
         l2c_link_check_send_pkts(p_ccb->p_lcb, NULL, NULL);
       }
       break;

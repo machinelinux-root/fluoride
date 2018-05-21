@@ -84,7 +84,7 @@
 #endif
 
 #ifndef AVDT_VERSION
-#define AVDT_VERSION 0x0102
+#define AVDT_VERSION 0x0103
 #endif
 
 #ifndef BTA_AG_AT_MAX_LEN
@@ -107,11 +107,6 @@
 #define BTA_AV_CO_CP_SCMS_T FALSE
 #endif
 
-/* This feature is used to enable interleaved scan */
-#ifndef BTA_HOST_INTERLEAVE_SEARCH
-#define BTA_HOST_INTERLEAVE_SEARCH FALSE
-#endif
-
 #ifndef BTA_DM_SDP_DB_SIZE
 #define BTA_DM_SDP_DB_SIZE 8000
 #endif
@@ -129,9 +124,15 @@
 #endif
 
 // How long to wait before activating sniff mode after entering the
-// idle state for FTS, OPS connections
+// idle state for server FT/RFCOMM, OPS connections
 #ifndef BTA_FTS_OPS_IDLE_TO_SNIFF_DELAY_MS
 #define BTA_FTS_OPS_IDLE_TO_SNIFF_DELAY_MS 7000
+#endif
+
+// How long to wait before activating sniff mode after entering the
+// idle state for client FT/RFCOMM connections
+#ifndef BTA_FTC_IDLE_TO_SNIFF_DELAY_MS
+#define BTA_FTC_IDLE_TO_SNIFF_DELAY_MS 5000
 #endif
 
 //------------------End added from bdroid_buildcfg.h---------------------
@@ -279,9 +280,8 @@
 #define BTM_SCO_INCLUDED TRUE /* TRUE includes SCO code */
 #endif
 
-/* Includes SCO if TRUE */
-#ifndef BTM_SCO_HCI_INCLUDED
-#define BTM_SCO_HCI_INCLUDED FALSE /* TRUE includes SCO over HCI code */
+#ifndef DISABLE_WBS
+#define DISABLE_WBS FALSE
 #endif
 
 /*  This is used to work around a controller bug that doesn't like Disconnect
@@ -485,14 +485,14 @@
 
 /* The maximum number of simultaneous links that L2CAP can support. */
 #ifndef MAX_ACL_CONNECTIONS
-#define MAX_L2CAP_LINKS 7
+#define MAX_L2CAP_LINKS 13
 #else
 #define MAX_L2CAP_LINKS MAX_ACL_CONNECTIONS
 #endif
 
 /* The maximum number of simultaneous channels that L2CAP can support. */
 #ifndef MAX_L2CAP_CHANNELS
-#define MAX_L2CAP_CHANNELS 16
+#define MAX_L2CAP_CHANNELS 32
 #endif
 
 /* The maximum number of simultaneous applications that can register with L2CAP.
@@ -766,7 +766,7 @@
 
 /* The MTU size for the L2CAP configuration. */
 #ifndef SDP_MTU_SIZE
-#define SDP_MTU_SIZE 672
+#define SDP_MTU_SIZE 1024
 #endif
 
 /* The flush timeout for the L2CAP configuration. */
@@ -1000,7 +1000,7 @@
 
 /* Number of simultaneous links to different peer devices. */
 #ifndef AVDT_NUM_LINKS
-#define AVDT_NUM_LINKS 2
+#define AVDT_NUM_LINKS 6
 #endif
 
 /* Number of simultaneous stream endpoints. */
@@ -1010,7 +1010,7 @@
 
 /* Number of transport channels setup by AVDT for all media streams */
 #ifndef AVDT_NUM_TC_TBL
-#define AVDT_NUM_TC_TBL 6
+#define AVDT_NUM_TC_TBL (AVDT_NUM_SEPS + AVDT_NUM_LINKS)
 #endif
 
 /* Maximum size in bytes of the content protection information element. */
@@ -1208,12 +1208,12 @@
 
 /* Number of simultaneous ACL links to different peer devices. */
 #ifndef AVCT_NUM_LINKS
-#define AVCT_NUM_LINKS 2
+#define AVCT_NUM_LINKS 6
 #endif
 
 /* Number of simultaneous AVCTP connections. */
 #ifndef AVCT_NUM_CONN
-#define AVCT_NUM_CONN 3
+#define AVCT_NUM_CONN 14  // 2 * MaxDevices + 2
 #endif
 
 /******************************************************************************

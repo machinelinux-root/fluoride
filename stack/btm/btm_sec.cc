@@ -35,6 +35,7 @@
 
 #include "bt_types.h"
 #include "bt_utils.h"
+#include "btif_storage.h"
 #include "btm_int.h"
 #include "btu.h"
 #include "hcimsgs.h"
@@ -58,7 +59,6 @@ static tBTM_SEC_SERV_REC* btm_sec_find_mx_serv(uint8_t is_originator,
                                                uint32_t mx_proto_id,
                                                uint32_t mx_chan_id);
 
-static tBTM_STATUS btm_sec_execute_procedure(tBTM_SEC_DEV_REC* p_dev_rec);
 static bool btm_sec_start_get_name(tBTM_SEC_DEV_REC* p_dev_rec);
 static void btm_sec_start_authentication(tBTM_SEC_DEV_REC* p_dev_rec);
 static void btm_sec_start_encryption(tBTM_SEC_DEV_REC* p_dev_rec);
@@ -873,7 +873,8 @@ tBTM_STATUS btm_sec_bond_by_transport(const RawAddress& bd_addr,
   tACL_CONN* p = btm_bda_to_acl(bd_addr, transport);
   VLOG(1) << __func__ << " BDA: " << bd_addr;
 
-  BTM_TRACE_DEBUG("btm_sec_bond_by_transport: Transport used %d", transport);
+  BTM_TRACE_DEBUG("%s: Transport used %d, bd_addr=%s", __func__, transport,
+                  bd_addr.ToString().c_str());
 
   /* Other security process is in progress */
   if (btm_cb.pairing_state != BTM_PAIR_STATE_IDLE) {
@@ -1286,9 +1287,9 @@ tBTM_STATUS BTM_SetEncryption(const RawAddress& bd_addr,
 
   BTM_TRACE_API(
       "Security Manager: BTM_SetEncryption Handle:%d State:%d Flags:0x%x "
-      "Required:0x%x",
+      "Required:0x%x, p_dev_rec=%p, p_callback=%p",
       p_dev_rec->hci_handle, p_dev_rec->sec_state, p_dev_rec->sec_flags,
-      p_dev_rec->security_required);
+      p_dev_rec->security_required, p_dev_rec, p_callback);
 
   if (transport == BT_TRANSPORT_LE) {
     tACL_CONN* p = btm_bda_to_acl(bd_addr, transport);
@@ -1305,6 +1306,11 @@ tBTM_STATUS BTM_SetEncryption(const RawAddress& bd_addr,
 
   if (rc != BTM_CMD_STARTED && rc != BTM_BUSY) {
     if (p_callback) {
+      BTM_TRACE_DEBUG(
+          "%s: clearing p_callback=%p, p_dev_rec=%p, transport=%d, "
+          "bd_addr=%s",
+          __func__, p_callback, p_dev_rec, transport,
+          bd_addr.ToString().c_str());
       p_dev_rec->p_callback = NULL;
       (*p_callback)(&bd_addr, transport, p_dev_rec->p_ref_data, rc);
     }
@@ -1427,7 +1433,6 @@ void BTM_ConfirmReqReply(tBTM_STATUS res, const RawAddress& bd_addr) {
  *                  BTM_MAX_PASSKEY_VAL(999999(0xF423F)).
  *
  ******************************************************************************/
-#if (BTM_LOCAL_IO_CAPS != BTM_IO_CAP_NONE)
 void BTM_PasskeyReqReply(tBTM_STATUS res, const RawAddress& bd_addr,
                          uint32_t passkey) {
   BTM_TRACE_API("BTM_PasskeyReqReply: State: %s  res:%d",
@@ -1474,7 +1479,6 @@ void BTM_PasskeyReqReply(tBTM_STATUS res, const RawAddress& bd_addr,
     btsnd_hcic_user_passkey_reply(bd_addr, passkey);
   }
 }
-#endif
 
 /*******************************************************************************
  *
@@ -1490,13 +1494,11 @@ void BTM_PasskeyReqReply(tBTM_STATUS res, const RawAddress& bd_addr,
  *                  type - notification type
  *
  ******************************************************************************/
-#if (BTM_LOCAL_IO_CAPS != BTM_IO_CAP_NONE)
 void BTM_SendKeypressNotif(const RawAddress& bd_addr, tBTM_SP_KEY_TYPE type) {
   /* This API only make sense between PASSKEY_REQ and SP complete */
   if (btm_cb.pairing_state == BTM_PAIR_STATE_KEY_ENTRY)
     btsnd_hcic_send_keypress_notif(bd_addr, type);
 }
-#endif
 
 /*******************************************************************************
  *
@@ -1938,8 +1940,8 @@ tBTM_STATUS btm_sec_l2cap_access_req(const RawAddress& bd_addr, uint16_t psm,
 
   is_originator = conn_type;
 
-  BTM_TRACE_DEBUG("%s() is_originator:%d, 0x%x", __func__, is_originator,
-                  p_ref_data);
+  BTM_TRACE_DEBUG("%s() is_originator:%d, 0x%x, psm=0x%04x", __func__,
+                  is_originator, p_ref_data, psm);
 
   /* Find or get oldest record */
   p_dev_rec = btm_find_or_alloc_dev(bd_addr);
@@ -2226,6 +2228,8 @@ tBTM_STATUS btm_sec_l2cap_access_req(const RawAddress& bd_addr, uint16_t psm,
 
   rc = btm_sec_execute_procedure(p_dev_rec);
   if (rc != BTM_CMD_STARTED) {
+    BTM_TRACE_DEBUG("%s: p_dev_rec=%p, clearing callback. old p_callback=%p",
+                    __func__, p_dev_rec, p_dev_rec->p_callback);
     p_dev_rec->p_callback = NULL;
     (*p_callback)(&bd_addr, transport, p_dev_rec->p_ref_data, (uint8_t)rc);
   }
@@ -2712,7 +2716,7 @@ void btm_sec_device_down(void) {
 void btm_sec_dev_reset(void) {
   if (controller_get_interface()->supports_simple_pairing()) {
     /* set the default IO capabilities */
-    btm_cb.devcb.loc_io_caps = BTM_LOCAL_IO_CAPS;
+    btm_cb.devcb.loc_io_caps = btif_storage_get_local_io_caps();
     /* add mx service to use no security */
     BTM_SetSecurityLevel(false, "RFC_MUX", BTM_SEC_SERVICE_RFC_MUX,
                          BTM_SEC_NONE, BT_PSM_RFCOMM, BTM_SEC_PROTO_RFCOMM, 0);
@@ -2745,6 +2749,9 @@ void btm_sec_abort_access_req(const RawAddress& bd_addr) {
     return;
 
   p_dev_rec->sec_state = BTM_SEC_STATE_IDLE;
+
+  BTM_TRACE_DEBUG("%s: clearing callback. p_dev_rec=%p, p_callback=%p",
+                  __func__, p_dev_rec, p_dev_rec->p_callback);
   p_dev_rec->p_callback = NULL;
 }
 
@@ -3388,26 +3395,27 @@ void btm_proc_sp_req_evt(tBTM_SP_EVT event, uint8_t* p) {
 
         evt_data.cfm_req.just_works = true;
 
-/* process user confirm req in association with the auth_req param */
-#if (BTM_LOCAL_IO_CAPS == BTM_IO_CAP_IO)
-        if (p_dev_rec->rmt_io_caps == BTM_IO_CAP_UNKNOWN) {
-          BTM_TRACE_ERROR(
-              "%s did not receive IO cap response prior"
-              " to BTM_SP_CFM_REQ_EVT, failing pairing request",
-              __func__);
-          status = BTM_WRONG_MODE;
-          BTM_ConfirmReqReply(status, p_bda);
-          return;
+        /* process user confirm req in association with the auth_req param */
+        if (btm_cb.devcb.loc_io_caps == BTM_IO_CAP_IO) {
+          if (p_dev_rec->rmt_io_caps == BTM_IO_CAP_UNKNOWN) {
+            BTM_TRACE_ERROR(
+                "%s did not receive IO cap response prior"
+                " to BTM_SP_CFM_REQ_EVT, failing pairing request",
+                __func__);
+            status = BTM_WRONG_MODE;
+            BTM_ConfirmReqReply(status, p_bda);
+            return;
+          }
+          if ((p_dev_rec->rmt_io_caps == BTM_IO_CAP_IO) &&
+              (btm_cb.devcb.loc_io_caps == BTM_IO_CAP_IO) &&
+              ((p_dev_rec->rmt_auth_req & BTM_AUTH_SP_YES) ||
+               (btm_cb.devcb.loc_auth_req & BTM_AUTH_SP_YES))) {
+            /* Both devices are DisplayYesNo and one or both devices want to
+               authenticate -> use authenticated link key */
+            evt_data.cfm_req.just_works = false;
+          }
         }
-        if ((p_dev_rec->rmt_io_caps == BTM_IO_CAP_IO) &&
-            (btm_cb.devcb.loc_io_caps == BTM_IO_CAP_IO) &&
-            ((p_dev_rec->rmt_auth_req & BTM_AUTH_SP_YES) ||
-             (btm_cb.devcb.loc_auth_req & BTM_AUTH_SP_YES))) {
-          /* Both devices are DisplayYesNo and one or both devices want to
-             authenticate -> use authenticated link key */
-          evt_data.cfm_req.just_works = false;
-        }
-#endif
+
         BTM_TRACE_DEBUG(
             "btm_proc_sp_req_evt()  just_works:%d, io loc:%d, rmt:%d, auth "
             "loc:%d, rmt:%d",
@@ -3430,12 +3438,12 @@ void btm_proc_sp_req_evt(tBTM_SP_EVT event, uint8_t* p) {
         btm_sec_change_pairing_state(BTM_PAIR_STATE_WAIT_AUTH_COMPLETE);
         break;
 
-#if (BTM_LOCAL_IO_CAPS != BTM_IO_CAP_NONE)
       case BTM_SP_KEY_REQ_EVT:
-        /* HCI_USER_PASSKEY_REQUEST_EVT */
-        btm_sec_change_pairing_state(BTM_PAIR_STATE_KEY_ENTRY);
+        if (btm_cb.devcb.loc_io_caps != BTM_IO_CAP_NONE) {
+          /* HCI_USER_PASSKEY_REQUEST_EVT */
+          btm_sec_change_pairing_state(BTM_PAIR_STATE_KEY_ENTRY);
+        }
         break;
-#endif
     }
 
     if (btm_cb.api.p_sp_callback) {
@@ -3453,12 +3461,10 @@ void btm_proc_sp_req_evt(tBTM_SP_EVT event, uint8_t* p) {
     if (event == BTM_SP_CFM_REQ_EVT) {
       BTM_TRACE_DEBUG("calling BTM_ConfirmReqReply with status: %d", status);
       BTM_ConfirmReqReply(status, p_bda);
-    }
-#if (BTM_LOCAL_IO_CAPS != BTM_IO_CAP_NONE)
-    else if (event == BTM_SP_KEY_REQ_EVT) {
+    } else if (btm_cb.devcb.loc_io_caps != BTM_IO_CAP_NONE &&
+               event == BTM_SP_KEY_REQ_EVT) {
       BTM_PasskeyReqReply(status, p_bda, 0);
     }
-#endif
     return;
   }
 
@@ -3479,12 +3485,9 @@ void btm_proc_sp_req_evt(tBTM_SP_EVT event, uint8_t* p) {
     if (p_dev_rec != NULL) {
       btm_sec_disconnect(p_dev_rec->hci_handle, HCI_ERR_AUTH_FAILURE);
     }
-  }
-#if (BTM_LOCAL_IO_CAPS != BTM_IO_CAP_NONE)
-  else {
+  } else if (btm_cb.devcb.loc_io_caps != BTM_IO_CAP_NONE) {
     btsnd_hcic_user_passkey_neg_reply(p_bda);
   }
-#endif
 }
 
 /*******************************************************************************
@@ -3758,14 +3761,14 @@ void btm_sec_auth_complete(uint16_t handle, uint8_t status) {
   bool are_bonding = false;
 
   if (p_dev_rec) {
-    VLOG(2) << __func__ << "Security Manager: in state: "
+    VLOG(2) << __func__ << ": Security Manager: in state: "
             << btm_pair_state_descr(btm_cb.pairing_state)
             << " handle:" << handle << " status:" << status
             << "dev->sec_state:" << p_dev_rec->sec_state
             << " bda:" << p_dev_rec->bd_addr
             << "RName:" << p_dev_rec->sec_bd_name;
   } else {
-    VLOG(2) << __func__ << "Security Manager: in state: "
+    VLOG(2) << __func__ << ": Security Manager: in state: "
             << btm_pair_state_descr(btm_cb.pairing_state)
             << " handle:" << handle << " status:" << status;
   }
@@ -4032,8 +4035,12 @@ void btm_sec_encrypt_change(uint16_t handle, uint8_t status,
   if (p_dev_rec->sec_state != BTM_SEC_STATE_ENCRYPTING) {
     if (BTM_SEC_STATE_DELAY_FOR_ENC == p_dev_rec->sec_state) {
       p_dev_rec->sec_state = BTM_SEC_STATE_IDLE;
+      BTM_TRACE_DEBUG("%s: clearing callback. p_dev_rec=%p, p_callback=%p",
+                      __func__, p_dev_rec, p_dev_rec->p_callback);
       p_dev_rec->p_callback = NULL;
       l2cu_resubmit_pending_sec_req(&p_dev_rec->bd_addr);
+    } else if (p_dev_rec->sec_state == BTM_SEC_STATE_AUTHENTICATING) {
+      p_dev_rec->sec_state = BTM_SEC_STATE_IDLE;
     }
     return;
   }
@@ -4087,7 +4094,7 @@ static void btm_sec_connect_after_reject_timeout(UNUSED_ATTR void* data) {
  * Function         btm_sec_connected
  *
  * Description      This function is when a connection to the peer device is
- *                  establsihed
+ *                  established
  *
  * Returns          void
  *
@@ -4103,16 +4110,16 @@ void btm_sec_connected(const RawAddress& bda, uint16_t handle, uint8_t status,
   btm_acl_resubmit_page();
 
   if (p_dev_rec) {
-    VLOG(2) << __func__ << "Security Manager: in state: "
+    VLOG(2) << __func__ << ": Security Manager: in state: "
             << btm_pair_state_descr(btm_cb.pairing_state)
-            << " handle:" << handle << " status:" << status
-            << "enc_mode:" << enc_mode << " bda:" << bda
-            << "RName:" << p_dev_rec->sec_bd_name;
+            << " handle:" << handle << " status:" << loghex(status)
+            << " enc_mode:" << loghex(enc_mode) << " bda:" << bda
+            << " RName:" << p_dev_rec->sec_bd_name;
   } else {
-    VLOG(2) << __func__ << "Security Manager: in state: "
+    VLOG(2) << __func__ << ": Security Manager: in state: "
             << btm_pair_state_descr(btm_cb.pairing_state)
-            << " handle:" << handle << " status:" << status
-            << "enc_mode:" << enc_mode << " bda:" << bda;
+            << " handle:" << handle << " status:" << loghex(status)
+            << " enc_mode:" << loghex(enc_mode) << " bda:" << bda;
   }
 
   if (!p_dev_rec) {
@@ -4281,6 +4288,15 @@ void btm_sec_connected(const RawAddress& bda, uint16_t handle, uint8_t status,
                                                p_dev_rec->dev_class,
                                                p_dev_rec->sec_bd_name, status);
       }
+    }
+
+    if (btm_cb.pairing_bda != bda) {
+      /* Don't callback unless this Connection-Complete-failure event has the
+       * same mac address as the bonding device */
+      VLOG(1) << __func__
+              << ": Different mac addresses: pairing_bda=" << btm_cb.pairing_bda
+              << ", bda=" << bda << ", do not callback";
+      return;
     }
 
     if (status == HCI_ERR_CONNECTION_TOUT ||
@@ -4480,6 +4496,13 @@ void btm_sec_disconnected(uint16_t handle, uint8_t reason) {
       (*btm_cb.api.p_auth_complete_callback)(p_dev_rec->bd_addr,
                                              p_dev_rec->dev_class,
                                              p_dev_rec->sec_bd_name, result);
+
+      // |btm_cb.api.p_auth_complete_callback| may cause |p_dev_rec| to be
+      // deallocated.
+      p_dev_rec = btm_find_dev_by_handle(handle);
+      if (!p_dev_rec) {
+        return;
+      }
     }
   }
 
@@ -4518,6 +4541,8 @@ void btm_sec_disconnected(uint16_t handle, uint8_t reason) {
 
   /* if security is pending, send callback to clean up the security state */
   if (p_callback) {
+    BTM_TRACE_DEBUG("%s: clearing callback. p_dev_rec=%p, p_callback=%p",
+                    __func__, p_dev_rec, p_dev_rec->p_callback);
     p_dev_rec->p_callback =
         NULL; /* when the peer device time out the authentication before
                  we do, this call back must be reset here */
@@ -4670,6 +4695,7 @@ void btm_sec_link_key_request(const RawAddress& bda) {
   tBTM_SEC_DEV_REC* p_dev_rec = btm_find_or_alloc_dev(bda);
 
   VLOG(2) << __func__ << " bda: " << bda;
+  p_dev_rec->sec_state = BTM_SEC_STATE_AUTHENTICATING;
 
   if ((btm_cb.pairing_state == BTM_PAIR_STATE_WAIT_PIN_REQ) &&
       (btm_cb.collision_start_time != 0) &&
@@ -4706,11 +4732,9 @@ void btm_sec_link_key_request(const RawAddress& bda) {
 static void btm_sec_pairing_timeout(UNUSED_ATTR void* data) {
   tBTM_CB* p_cb = &btm_cb;
   tBTM_SEC_DEV_REC* p_dev_rec;
-#if (BTM_LOCAL_IO_CAPS == BTM_IO_CAP_NONE)
-  tBTM_AUTH_REQ auth_req = BTM_AUTH_AP_NO;
-#else
-  tBTM_AUTH_REQ auth_req = BTM_AUTH_AP_YES;
-#endif
+  tBTM_AUTH_REQ auth_req = (btm_cb.devcb.loc_io_caps == BTM_IO_CAP_NONE)
+                               ? BTM_AUTH_AP_NO
+                               : BTM_AUTH_AP_YES;
   uint8_t name[2];
 
   p_dev_rec = btm_find_dev(p_cb->pairing_bda);
@@ -4746,12 +4770,13 @@ static void btm_sec_pairing_timeout(UNUSED_ATTR void* data) {
       /* btm_sec_change_pairing_state (BTM_PAIR_STATE_IDLE); */
       break;
 
-#if (BTM_LOCAL_IO_CAPS != BTM_IO_CAP_NONE)
     case BTM_PAIR_STATE_KEY_ENTRY:
-      btsnd_hcic_user_passkey_neg_reply(p_cb->pairing_bda);
-      /* btm_sec_change_pairing_state (BTM_PAIR_STATE_IDLE); */
+      if (btm_cb.devcb.loc_io_caps != BTM_IO_CAP_NONE) {
+        btsnd_hcic_user_passkey_neg_reply(p_cb->pairing_bda);
+      } else {
+        btm_sec_change_pairing_state(BTM_PAIR_STATE_IDLE);
+      }
       break;
-#endif /* !BTM_IO_CAP_NONE */
 
     case BTM_PAIR_STATE_WAIT_LOCAL_IOCAPS:
       if (btm_cb.pairing_flags & BTM_PAIR_FLAGS_WE_STARTED_DD)
@@ -4983,7 +5008,7 @@ void btm_sec_update_clock_offset(uint16_t handle, uint16_t clock_offset) {
  *                  BTM_NO_RESOURCES  - permission declined
  *
  ******************************************************************************/
-static tBTM_STATUS btm_sec_execute_procedure(tBTM_SEC_DEV_REC* p_dev_rec) {
+tBTM_STATUS btm_sec_execute_procedure(tBTM_SEC_DEV_REC* p_dev_rec) {
   BTM_TRACE_EVENT(
       "btm_sec_execute_procedure: Required:0x%x Flags:0x%x State:%d",
       p_dev_rec->security_required, p_dev_rec->sec_flags, p_dev_rec->sec_state);
@@ -5528,6 +5553,10 @@ static const char* btm_pair_state_descr(tBTM_PAIRING_STATE state) {
 void btm_sec_dev_rec_cback_event(tBTM_SEC_DEV_REC* p_dev_rec, uint8_t res,
                                  bool is_le_transport) {
   tBTM_SEC_CALLBACK* p_callback = p_dev_rec->p_callback;
+
+  BTM_TRACE_DEBUG("%s: p_callback=%p, is_le_transport=%d, res=%d, p_dev_rec=%p",
+                  __func__, p_dev_rec->p_callback, is_le_transport, res,
+                  p_dev_rec);
 
   if (p_dev_rec->p_callback) {
     p_dev_rec->p_callback = NULL;

@@ -318,7 +318,6 @@ bool gatt_is_srv_chg_ind_pending(tGATT_TCB* p_tcb) {
  *
  ******************************************************************************/
 tGATTS_SRV_CHG* gatt_is_bda_in_the_srv_chg_clt_list(const RawAddress& bda) {
-  tGATTS_SRV_CHG* p_buf = NULL;
 
   VLOG(1) << __func__ << ": " << bda;
 
@@ -330,11 +329,11 @@ tGATTS_SRV_CHG* gatt_is_bda_in_the_srv_chg_clt_list(const RawAddress& bda) {
     tGATTS_SRV_CHG* p_buf = (tGATTS_SRV_CHG*)list_node(node);
     if (bda == p_buf->bda) {
       VLOG(1) << "bda is in the srv chg clt list";
-      break;
+      return p_buf;
     }
   }
 
-  return p_buf;
+  return NULL;
 }
 
 /*******************************************************************************
@@ -452,6 +451,14 @@ tGATT_TCB* gatt_allocate_tcb_by_bdaddr(const RawAddress& bda,
   }
 
   return NULL;
+}
+
+/** gatt_build_uuid_to_stream will convert 32bit UUIDs to 128bit. This function
+ * will return lenght required to build uuid, either |UUID:kNumBytes16| or
+ * |UUID::kNumBytes128| */
+uint8_t gatt_build_uuid_to_stream_len(const Uuid& uuid) {
+  size_t len = uuid.GetShortestRepresentationSize();
+  return len == Uuid::kNumBytes32 ? Uuid::kNumBytes128 : len;
 }
 
 /** Add UUID into stream. Returns UUID length. */

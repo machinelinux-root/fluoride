@@ -37,12 +37,21 @@
 #define L2CAP_MIN_MTU 48 /* Minimum acceptable MTU is 48 bytes */
 
 /* LE credit based L2CAP connection parameters */
-#define L2CAP_LE_MIN_MTU 23
-#define L2CAP_LE_MIN_MPS 23
-#define L2CAP_LE_MAX_MPS 65533
-#define L2CAP_LE_MIN_CREDIT 0
-#define L2CAP_LE_MAX_CREDIT 65535
-#define L2CAP_LE_DEFAULT_CREDIT 1
+constexpr uint16_t L2CAP_LE_MIN_MTU = 23;  // Minimum SDU size
+constexpr uint16_t L2CAP_LE_MIN_MPS = 23;
+constexpr uint16_t L2CAP_LE_MAX_MPS = 65533;
+constexpr uint16_t L2CAP_LE_CREDIT_MAX = 65535;
+
+// This is initial amout of credits we send, and amount to which we increase
+// credits once they fall below threshold
+constexpr uint16_t L2CAP_LE_CREDIT_DEFAULT = 0xffff;
+
+// If credit count on remote fall below this value, we send back credits to
+// reach default value.
+constexpr uint16_t L2CAP_LE_CREDIT_THRESHOLD = 0x0040;
+
+static_assert(L2CAP_LE_CREDIT_THRESHOLD < L2CAP_LE_CREDIT_DEFAULT,
+              "Threshold must be smaller then default credits");
 
 /*
  * Timeout values (in milliseconds).
@@ -144,6 +153,11 @@ typedef enum {
   35                                             /* Upper layer credit packet \
                                                     */
 #define L2CEVT_L2CAP_RECV_FLOW_CONTROL_CREDIT 36 /* Peer credit packet */
+
+/* Constants for LE Dynamic PSM values */
+#define LE_DYNAMIC_PSM_START 0x0080
+#define LE_DYNAMIC_PSM_END 0x00FF
+#define LE_DYNAMIC_PSM_RANGE (LE_DYNAMIC_PSM_END - LE_DYNAMIC_PSM_START + 1)
 
 /* Bitmask to skip over Broadcom feature reserved (ID) to avoid sending two
    successive ID values, '0' id only or both */
@@ -322,6 +336,10 @@ typedef struct t_l2c_ccb {
   uint16_t fixed_chnl_idle_tout; /* Idle timeout to use for the fixed channel */
 #endif
   uint16_t tx_data_len;
+
+  /* Number of LE frames that the remote can send to us (credit count in
+   * remote). Valid only for LE CoC */
+  uint16_t remote_credit_count;
 } tL2C_CCB;
 
 /***********************************************************************
@@ -425,6 +443,8 @@ typedef struct t_l2c_linkcb {
   uint16_t max_interval;
   uint16_t latency;
   uint16_t timeout;
+  uint16_t min_ce_len;
+  uint16_t max_ce_len;
 
 #if (L2CAP_ROUND_ROBIN_CHANNEL_SERVICE == TRUE)
   /* each priority group is limited burst transmission */
@@ -501,6 +521,10 @@ typedef struct {
 #endif /* (L2CAP_HIGH_PRI_CHAN_QUOTA_IS_CONFIGURABLE == TRUE) */
 
   uint16_t dyn_psm;
+
+  uint16_t le_dyn_psm; /* Next LE dynamic PSM value to try to assign */
+  bool le_dyn_psm_assigned[LE_DYNAMIC_PSM_RANGE]; /* Table of assigned LE PSM */
+
 } tL2C_CB;
 
 /* Define a structure that contains the information about a connection.
@@ -650,6 +674,7 @@ extern void l2cu_send_feature_req(tL2C_CCB* p_ccb);
 extern tL2C_RCB* l2cu_allocate_rcb(uint16_t psm);
 extern tL2C_RCB* l2cu_find_rcb_by_psm(uint16_t psm);
 extern void l2cu_release_rcb(tL2C_RCB* p_rcb);
+extern void l2cu_release_ble_rcb(tL2C_RCB* p_rcb);
 extern tL2C_RCB* l2cu_allocate_ble_rcb(uint16_t psm);
 extern tL2C_RCB* l2cu_find_ble_rcb_by_psm(uint16_t psm);
 
@@ -739,7 +764,7 @@ extern BT_HDR* l2c_fcr_get_next_xmit_sdu_seg(tL2C_CCB* p_ccb,
 extern void l2c_fcr_start_timer(tL2C_CCB* p_ccb);
 extern void l2c_lcc_proc_pdu(tL2C_CCB* p_ccb, BT_HDR* p_buf);
 extern BT_HDR* l2c_lcc_get_next_xmit_sdu_seg(tL2C_CCB* p_ccb,
-                                             uint16_t max_packet_length);
+                                             bool* last_piece_of_sdu);
 
 /* Configuration negotiation */
 extern uint8_t l2c_fcr_chk_chan_modes(tL2C_CCB* p_ccb);

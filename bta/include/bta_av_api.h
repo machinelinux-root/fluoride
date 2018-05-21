@@ -91,18 +91,14 @@ typedef uint8_t tBTA_AV_HNDL;
 /* handle index to mask */
 #define BTA_AV_HNDL_TO_MSK(h) ((uint8_t)(1 << (h)))
 
-/* maximum number of streams created: 1 for audio, 1 for video */
+/* maximum number of streams created */
 #ifndef BTA_AV_NUM_STRS
-#define BTA_AV_NUM_STRS 2
+#define BTA_AV_NUM_STRS 6
 #endif
 
 #ifndef BTA_AV_MAX_A2DP_MTU
 /*#define BTA_AV_MAX_A2DP_MTU     668 //224 (DM5) * 3 - 4(L2CAP header) */
 #define BTA_AV_MAX_A2DP_MTU 1008
-#endif
-
-#ifndef BTA_AV_MAX_VDP_MTU
-#define BTA_AV_MAX_VDP_MTU 1008
 #endif
 
 /* operation id list for BTA_AvRemoteCmd */
@@ -158,6 +154,15 @@ typedef uint8_t tBTA_AV_ERR;
 
 typedef uint8_t tBTA_AV_EVT;
 
+typedef enum {
+  BTA_AV_CODEC_TYPE_UNKNOWN = 0x00,
+  BTA_AV_CODEC_TYPE_SBC = 0x01,
+  BTA_AV_CODEC_TYPE_AAC = 0x02,
+  BTA_AV_CODEC_TYPE_APTX = 0x04,
+  BTA_AV_CODEC_TYPE_APTXHD = 0x08,
+  BTA_AV_CODEC_TYPE_LDAC = 0x10
+} tBTA_AV_CODEC_TYPE;
+
 /* Event associated with BTA_AV_ENABLE_EVT */
 typedef struct { tBTA_AV_FEAT features; } tBTA_AV_ENABLE;
 
@@ -199,7 +204,7 @@ typedef struct {
   bool suspending;
 } tBTA_AV_START;
 
-/* data associated with BTA_AV_SUSPEND_EVT */
+/* data associated with BTA_AV_SUSPEND_EVT, BTA_AV_STOP_EVT */
 typedef struct {
   tBTA_AV_CHNL chnl;
   tBTA_AV_HNDL hndl;
@@ -363,10 +368,9 @@ typedef void(tBTA_AV_CBACK)(tBTA_AV_EVT event, tBTA_AV* p_data);
 typedef void(tBTA_AV_SINK_DATA_CBACK)(tBTA_AV_EVT event, tBTA_AV_MEDIA* p_data);
 
 /* type for stream state machine action functions */
-typedef void (*tBTA_AV_ACT)(void* p_cb, void* p_data);
-
-/* type for registering VDP */
-typedef void(tBTA_AV_REG)(tAVDT_CS* p_cs, char* p_service_name, void* p_data);
+struct tBTA_AV_SCB;
+union tBTA_AV_DATA;
+typedef void (*tBTA_AV_ACT)(tBTA_AV_SCB* p_cb, tBTA_AV_DATA* p_data);
 
 /* AV configuration structure */
 typedef struct {
@@ -380,8 +384,6 @@ typedef struct {
   const uint16_t*
       p_audio_flush_to;    /* AVDTP audio transport channel flush timeout */
   uint16_t audio_mqs;      /* AVDTP audio channel max data queue size */
-  uint16_t video_mtu;      /* AVDTP video transport channel MTU at L2CAP */
-  uint16_t video_flush_to; /* AVDTP video transport channel flush timeout */
   bool avrc_group;     /* true, to accept AVRC 1.3 group nevigation command */
   uint8_t num_co_ids;  /* company id count in p_meta_co_ids */
   uint8_t num_evt_ids; /* event id count in p_meta_evt_ids */
@@ -391,8 +393,7 @@ typedef struct {
       p_meta_co_ids; /* the metadata Get Capabilities response for company id */
   const uint8_t* p_meta_evt_ids; /* the the metadata Get Capabilities response
                                     for event id */
-  const tBTA_AV_ACT* p_act_tbl;  /* the action function table for VDP stream */
-  tBTA_AV_REG* p_reg;            /* action function to register VDP */
+  const tBTA_AV_ACT* p_act_tbl;  /* action function table for audio stream */
   char avrc_controller_name[BTA_SERVICE_NAME_LEN]; /* Default AVRCP controller
                                                       name */
   char avrc_target_name[BTA_SERVICE_NAME_LEN]; /* Default AVRCP target name*/
@@ -503,7 +504,7 @@ void BTA_AvDisconnect(const RawAddress& bd_addr);
  * Returns          void
  *
  ******************************************************************************/
-void BTA_AvStart(void);
+void BTA_AvStart(tBTA_AV_HNDL handle);
 
 /*******************************************************************************
  *
@@ -516,7 +517,7 @@ void BTA_AvStart(void);
  * Returns          void
  *
  ******************************************************************************/
-void BTA_AvStop(bool suspend);
+void BTA_AvStop(tBTA_AV_HNDL handle, bool suspend);
 
 /*******************************************************************************
  *
@@ -701,5 +702,13 @@ void BTA_AvOffloadStart(tBTA_AV_HNDL hndl);
  *
  ******************************************************************************/
 void BTA_AvOffloadStartRsp(tBTA_AV_HNDL hndl, tBTA_AV_STATUS status);
+
+/**
+ * Dump debug-related information for the BTA AV module.
+ *
+ * @param fd the file descriptor to use for writing the ASCII formatted
+ * information
+ */
+void bta_debug_av_dump(int fd);
 
 #endif /* BTA_AV_API_H */

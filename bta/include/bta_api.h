@@ -291,10 +291,6 @@ typedef struct {
                       */
   tBTA_DM_INQ_FILT filter_type; /* Filter condition type. */
   tBTA_DM_INQ_COND filter_cond; /* Filter condition data. */
-#if (BTA_HOST_INTERLEAVE_SEARCH == TRUE)
-  uint8_t intl_duration
-      [4]; /*duration array storing the interleave scan's time portions*/
-#endif
 } tBTA_DM_INQ;
 
 typedef struct {
@@ -1073,7 +1069,7 @@ extern tBTA_STATUS BTA_DisableBluetooth(void);
  * Returns          tBTA_STATUS
  *
  ******************************************************************************/
-extern tBTA_STATUS BTA_EnableTestMode(void);
+extern void BTA_EnableTestMode(void);
 
 /*******************************************************************************
  *
@@ -1364,59 +1360,6 @@ extern tBTA_STATUS BTA_DmSetLocalDiRecord(tBTA_DI_RECORD* p_device_info,
 extern void BTA_DmCloseACL(const RawAddress& bd_addr, bool remove_dev,
                            tBTA_TRANSPORT transport);
 
-/*******************************************************************************
- *
- * Function         bta_dmexecutecallback
- *
- * Description      This function will request BTA to execute a call back in the
- *                  context of BTU task.
- *                  This API was named in lower case because it is only intended
- *                  for the internal customers(like BTIF).
- *
- * Returns          void
- *
- ******************************************************************************/
-extern void bta_dmexecutecallback(tBTA_DM_EXEC_CBACK* p_callback,
-                                  void* p_param);
-
-#if (BTM_SCO_HCI_INCLUDED == TRUE)
-/*******************************************************************************
- *
- * Function         BTA_DmPcmInitSamples
- *
- * Description      initialize the down sample converter.
- *
- *                  src_sps: original samples per second (source audio data)
- *                            (ex. 44100, 48000)
- *                  bits: number of bits per pcm sample (16)
- *                  n_channels: number of channels (i.e. mono(1), stereo(2)...)
- *
- * Returns          none
- *
- ******************************************************************************/
-extern void BTA_DmPcmInitSamples(uint32_t src_sps, uint32_t bits,
-                                 uint32_t n_channels);
-
-/*******************************************************************************
- * Function         BTA_DmPcmResample
- *
- * Description      Down sampling utility to convert higher sampling rate into
- *                  8K/16bits
- *                  PCM samples.
- *
- * Parameters       p_src: pointer to the buffer where the original sampling PCM
- *                              are stored.
- *                  in_bytes:  Length of the input PCM sample buffer in byte.
- *                  p_dst: pointer to the buffer which is to be used to store
- *                         the converted PCM samples.
- *
- *
- * Returns          int32_t: number of samples converted.
- *
- ******************************************************************************/
-extern int32_t BTA_DmPcmResample(void* p_src, uint32_t in_bytes, void* p_dst);
-#endif
-
 /* BLE related API functions */
 /*******************************************************************************
  *
@@ -1705,7 +1648,9 @@ extern void BTA_DmBleEnableRemotePrivacy(const RawAddress& bd_addr,
  ******************************************************************************/
 extern void BTA_DmBleUpdateConnectionParams(const RawAddress& bd_addr,
                                             uint16_t min_int, uint16_t max_int,
-                                            uint16_t latency, uint16_t timeout);
+                                            uint16_t latency, uint16_t timeout,
+                                            uint16_t min_ce_len,
+                                            uint16_t max_ce_len);
 
 /*******************************************************************************
  *

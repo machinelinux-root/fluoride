@@ -502,7 +502,7 @@ tBTM_STATUS BTM_CancelPeriodicInquiry(void) {
   /* Only cancel if one is active */
   if (btm_cb.btm_inq_vars.inq_active & BTM_PERIODIC_INQUIRY_ACTIVE) {
     btm_cb.btm_inq_vars.inq_active = BTM_INQUIRY_INACTIVE;
-    btm_cb.btm_inq_vars.p_inq_results_cb = (tBTM_INQ_RESULTS_CB*)NULL;
+    btm_cb.btm_inq_vars.p_inq_results_cb = NULL;
 
     btsnd_hcic_exit_per_inq();
 
@@ -649,9 +649,6 @@ uint16_t BTM_IsInquiryActive(void) {
 tBTM_STATUS BTM_CancelInquiry(void) {
   tBTM_STATUS status = BTM_SUCCESS;
   tBTM_INQUIRY_VAR_ST* p_inq = &btm_cb.btm_inq_vars;
-#if (BTA_HOST_INTERLEAVE_SEARCH == TRUE)
-  uint8_t active_mode = p_inq->inq_active;
-#endif
   BTM_TRACE_API("BTM_CancelInquiry called");
 
   /*** Make sure the device is ready ***/
@@ -663,10 +660,8 @@ tBTM_STATUS BTM_CancelInquiry(void) {
       (!(p_inq->inq_active & BTM_PERIODIC_INQUIRY_ACTIVE))) {
     p_inq->inq_active = BTM_INQUIRY_INACTIVE;
     p_inq->state = BTM_INQ_INACTIVE_STATE;
-    p_inq->p_inq_results_cb =
-        (tBTM_INQ_RESULTS_CB*)NULL; /* Do not notify caller anymore */
-    p_inq->p_inq_cmpl_cb =
-        (tBTM_CMPL_CB*)NULL; /* Do not notify caller anymore */
+    p_inq->p_inq_results_cb = NULL; /* Do not notify caller anymore */
+    p_inq->p_inq_cmpl_cb = NULL;    /* Do not notify caller anymore */
 
     /* If the event filter is in progress, mark it so that the processing of the
        return
@@ -677,18 +672,10 @@ tBTM_STATUS BTM_CancelInquiry(void) {
     }
     /* Initiate the cancel inquiry */
     else {
-      if (((p_inq->inqparms.mode & BTM_BR_INQUIRY_MASK) != 0)
-#if (BTA_HOST_INTERLEAVE_SEARCH == TRUE)
-          && (active_mode & BTM_BR_INQUIRY_MASK)
-#endif
-              ) {
+      if ((p_inq->inqparms.mode & BTM_BR_INQUIRY_MASK) != 0) {
         btsnd_hcic_inq_cancel();
       }
-      if (((p_inq->inqparms.mode & BTM_BLE_INQUIRY_MASK) != 0)
-#if (BTA_HOST_INTERLEAVE_SEARCH == TRUE)
-          && (active_mode & BTM_BLE_INQ_ACTIVE_MASK)
-#endif
-              )
+      if ((p_inq->inqparms.mode & BTM_BLE_INQUIRY_MASK) != 0)
         btm_ble_stop_inquiry();
     }
 
@@ -744,7 +731,6 @@ tBTM_STATUS BTM_CancelInquiry(void) {
 tBTM_STATUS BTM_StartInquiry(tBTM_INQ_PARMS* p_inqparms,
                              tBTM_INQ_RESULTS_CB* p_results_cb,
                              tBTM_CMPL_CB* p_cmpl_cb) {
-  tBTM_STATUS status = BTM_CMD_STARTED;
   tBTM_INQUIRY_VAR_ST* p_inq = &btm_cb.btm_inq_vars;
 
   BTM_TRACE_API("BTM_StartInquiry: mode: %d, dur: %d, rsps: %d, flt: %d",
@@ -756,31 +742,34 @@ tBTM_STATUS BTM_StartInquiry(tBTM_INQ_PARMS* p_inqparms,
   if (p_inq->inq_active || p_inq->inqfilt_active) {
     /*check if LE observe is already running*/
     if (p_inq->scan_type == INQ_LE_OBSERVE &&
-        p_inq->p_inq_ble_results_cb != NULL) {
+        p_inq->p_inq_ble_results_cb != nullptr) {
       BTM_TRACE_API("BTM_StartInquiry: LE observe in progress");
       p_inq->scan_type = INQ_GENERAL;
       p_inq->inq_active = BTM_INQUIRY_INACTIVE;
       btm_cb.ble_ctr_cb.inq_var.scan_type = BTM_BLE_SCAN_MODE_NONE;
       btm_send_hci_scan_enable(BTM_BLE_SCAN_DISABLE, BTM_BLE_DUPLICATE_ENABLE);
     } else {
-      BTM_TRACE_API("BTM_StartInquiry: return BUSY");
+      LOG(ERROR) << __func__ << ": BTM_BUSY";
       return (BTM_BUSY);
     }
-  } else
+  } else {
     p_inq->scan_type = INQ_GENERAL;
+  }
 
   /*** Make sure the device is ready ***/
-  if (!BTM_IsDeviceUp()) return (BTM_WRONG_MODE);
+  if (!BTM_IsDeviceUp()) {
+    LOG(ERROR) << __func__ << ": adapter is not up";
+    return BTM_WRONG_MODE;
+  }
 
   if ((p_inqparms->mode & BTM_BR_INQUIRY_MASK) != BTM_GENERAL_INQUIRY &&
       (p_inqparms->mode & BTM_BR_INQUIRY_MASK) != BTM_LIMITED_INQUIRY &&
       (p_inqparms->mode & BTM_BLE_INQUIRY_MASK) != BTM_BLE_GENERAL_INQUIRY &&
-      (p_inqparms->mode & BTM_BLE_INQUIRY_MASK) != BTM_BLE_LIMITED_INQUIRY)
+      (p_inqparms->mode & BTM_BLE_INQUIRY_MASK) != BTM_BLE_LIMITED_INQUIRY) {
+    LOG(ERROR) << __func__ << ": illegal inquiry mode "
+               << std::to_string(p_inqparms->mode);
     return (BTM_ILLEGAL_VALUE);
-
-#if (BTA_HOST_INTERLEAVE_SEARCH == TRUE)
-  if (p_inq->next_state == BTM_FINISH) return BTM_ILLEGAL_VALUE;
-#endif
+  }
 
   /* Save the inquiry parameters to be used upon the completion of
    * setting/clearing the inquiry filter */
@@ -796,136 +785,70 @@ tBTM_STATUS BTM_StartInquiry(tBTM_INQ_PARMS* p_inqparms,
   BTM_TRACE_DEBUG("BTM_StartInquiry: p_inq->inq_active = 0x%02x",
                   p_inq->inq_active);
 
-/* interleave scan minimal conditions */
-#if (BTA_HOST_INTERLEAVE_SEARCH == TRUE)
-
-  /* check if both modes are present */
-  if ((p_inqparms->mode & BTM_BLE_INQUIRY_MASK) &&
-      (p_inqparms->mode & BTM_BR_INQUIRY_MASK)) {
-    BTM_TRACE_API("BTM:Interleave Inquiry Mode Set");
-    p_inqparms->duration = p_inqparms->intl_duration[p_inq->next_state];
-    p_inq->inqparms.duration = p_inqparms->duration;
-  } else {
-    BTM_TRACE_API("BTM:Single Mode: No interleaving, Mode:0x%02x",
-                  p_inqparms->mode);
-    p_inq->next_state = BTM_NO_INTERLEAVING;
-  }
-#endif
-
+  tBTM_STATUS status = BTM_CMD_STARTED;
   /* start LE inquiry here if requested */
-  if ((p_inqparms->mode & BTM_BLE_INQUIRY_MASK)
-#if (BTA_HOST_INTERLEAVE_SEARCH == TRUE)
-      &&
-      (p_inq->next_state == BTM_BLE_ONE || p_inq->next_state == BTM_BLE_TWO ||
-       p_inq->next_state == BTM_NO_INTERLEAVING)
-#endif
-          )
-
-  {
-#if (BTA_HOST_INTERLEAVE_SEARCH == TRUE)
-    p_inq->inq_active = (p_inqparms->mode & BTM_BLE_INQUIRY_MASK);
-    BTM_TRACE_API("BTM:Starting LE Scan with duration %d and activeMode:0x%02x",
-                  p_inqparms->duration,
-                  (p_inqparms->mode & BTM_BLE_INQUIRY_MASK));
-#endif
+  if ((p_inqparms->mode & BTM_BLE_INQUIRY_MASK)) {
     if (!controller_get_interface()->supports_ble()) {
+      LOG(ERROR) << __func__ << ": trying to do LE scan on a non-LE adapter";
       p_inq->inqparms.mode &= ~BTM_BLE_INQUIRY_MASK;
       status = BTM_ILLEGAL_VALUE;
-    }
-    /* BLE for now does not support filter condition for inquiry */
-    else {
+    } else {
+      /* BLE for now does not support filter condition for inquiry */
       status = btm_ble_start_inquiry(
           (uint8_t)(p_inqparms->mode & BTM_BLE_INQUIRY_MASK),
           p_inqparms->duration);
       if (status != BTM_CMD_STARTED) {
-        BTM_TRACE_ERROR("Err Starting LE Inquiry.");
+        LOG(ERROR) << __func__ << ": Error Starting LE Inquiry";
         p_inq->inqparms.mode &= ~BTM_BLE_INQUIRY_MASK;
       }
     }
-#if (BTA_HOST_INTERLEAVE_SEARCH == FALSE)
     p_inqparms->mode &= ~BTM_BLE_INQUIRY_MASK;
-#endif
-
-#if (BTA_HOST_INTERLEAVE_SEARCH == TRUE)
-    if (p_inq->next_state == BTM_NO_INTERLEAVING) {
-      p_inq->next_state = BTM_FINISH;
-    } else {
-      BTM_TRACE_API(
-          "BTM:Interleaving: started LE scan, Advancing to next state: %d",
-          p_inq->next_state + 1);
-      p_inq->next_state += 1;
-    }
-    /* reset next_state if status <> BTM_Started */
-    if (status != BTM_CMD_STARTED) p_inq->next_state = BTM_BR_ONE;
-
-    /* if interleave scan..return here */
-    return status;
-#endif
 
     BTM_TRACE_DEBUG("BTM_StartInquiry: mode = %02x", p_inqparms->mode);
   }
 
   /* we're done with this routine if BR/EDR inquiry is not desired. */
-  if ((p_inqparms->mode & BTM_BR_INQUIRY_MASK) == BTM_INQUIRY_NONE)
+  if ((p_inqparms->mode & BTM_BR_INQUIRY_MASK) == BTM_INQUIRY_NONE) {
     return status;
+  }
 
-/* BR/EDR inquiry portion */
-#if (BTA_HOST_INTERLEAVE_SEARCH == TRUE)
-  if ((p_inq->next_state == BTM_BR_ONE || p_inq->next_state == BTM_BR_TWO ||
-       p_inq->next_state == BTM_NO_INTERLEAVING)) {
-    p_inq->inq_active = (p_inqparms->mode & BTM_BR_INQUIRY_MASK);
-#endif
-    /* If a filter is specified, then save it for later and clear the current
-       filter.
-       The setting of the filter is done upon completion of clearing of the
-       previous
-       filter.
-    */
-    switch (p_inqparms->filter_cond_type) {
-      case BTM_CLR_INQUIRY_FILTER:
-        p_inq->state = BTM_INQ_SET_FILT_STATE;
-        break;
+  /* BR/EDR inquiry portion */
+  /* If a filter is specified, then save it for later and clear the current
+     filter.
+     The setting of the filter is done upon completion of clearing of the
+     previous
+     filter.
+  */
+  switch (p_inqparms->filter_cond_type) {
+    case BTM_CLR_INQUIRY_FILTER:
+      p_inq->state = BTM_INQ_SET_FILT_STATE;
+      break;
 
-      case BTM_FILTER_COND_DEVICE_CLASS:
-      case BTM_FILTER_COND_BD_ADDR:
-        /* The filter is not being used so simply clear it;
-            the inquiry can start after this operation */
-        p_inq->state = BTM_INQ_CLR_FILT_STATE;
-        p_inqparms->filter_cond_type = BTM_CLR_INQUIRY_FILTER;
-        /* =============>>>> adding LE filtering here ????? */
-        break;
+    case BTM_FILTER_COND_DEVICE_CLASS:
+    case BTM_FILTER_COND_BD_ADDR:
+      /* The filter is not being used so simply clear it;
+          the inquiry can start after this operation */
+      p_inq->state = BTM_INQ_CLR_FILT_STATE;
+      p_inqparms->filter_cond_type = BTM_CLR_INQUIRY_FILTER;
+      /* =============>>>> adding LE filtering here ????? */
+      break;
 
-      default:
-        return (BTM_ILLEGAL_VALUE);
+    default:
+      LOG(ERROR) << __func__ << ": invalid filter condition type "
+                 << std::to_string(p_inqparms->filter_cond_type);
+      return (BTM_ILLEGAL_VALUE);
     }
 
     /* Before beginning the inquiry the current filter must be cleared, so
      * initiate the command */
     status = btm_set_inq_event_filter(p_inqparms->filter_cond_type,
                                       &p_inqparms->filter_cond);
-    if (status != BTM_CMD_STARTED) p_inq->state = BTM_INQ_INACTIVE_STATE;
-
-#if (BTA_HOST_INTERLEAVE_SEARCH == TRUE)
-    if (p_inq->next_state == BTM_NO_INTERLEAVING)
-      p_inq->next_state = BTM_FINISH;
-    else {
-      BTM_TRACE_API(
-          "BTM:Interleaving: Started BTM inq, Advancing to next state: %d",
-          p_inq->next_state + 1);
-      p_inq->next_state += 1;
+    if (status != BTM_CMD_STARTED) {
+      LOG(ERROR) << __func__ << ": failed to set inquiry event filter";
+      p_inq->state = BTM_INQ_INACTIVE_STATE;
     }
-  }
-  if (status != BTM_CMD_STARTED) {
-    /* Some error beginning the scan process.
-       Reset the next_state parameter.. Do we need to reset the inq_active also?
-    */
-    BTM_TRACE_API("BTM:Interleaving: Error in Starting inquiry, status: 0x%02x",
-                  status);
-    p_inq->next_state = BTM_BR_ONE;
-  }
-#endif
 
-  return (status);
+    return (status);
 }
 
 /*******************************************************************************
@@ -1921,27 +1844,12 @@ void btm_process_inq_complete(uint8_t status, uint8_t mode) {
   tBTM_CMPL_CB* p_inq_cb = btm_cb.btm_inq_vars.p_inq_cmpl_cb;
   tBTM_INQUIRY_VAR_ST* p_inq = &btm_cb.btm_inq_vars;
 
-#if (BTA_HOST_INTERLEAVE_SEARCH == TRUE)
-  /* inquiry inactive case happens when inquiry is cancelled.
-     Make mode 0 for no further inquiries from the current inquiry process
-  */
-  if (status != HCI_SUCCESS || p_inq->next_state == BTM_FINISH ||
-      !p_inq->inq_active) {
-    /* re-initialize for next inquiry request */
-    p_inq->next_state = BTM_BR_ONE;
-    /* make the mode 0 here */
-    p_inq->inqparms.mode &= ~(p_inq->inqparms.mode);
-  }
-#endif
-
-#if (BTA_HOST_INTERLEAVE_SEARCH == FALSE)
   p_inq->inqparms.mode &= ~(mode);
-#endif
 
   if (p_inq->scan_type == INQ_LE_OBSERVE && !p_inq->inq_active) {
     /*end of LE observe*/
-    p_inq->p_inq_ble_results_cb = (tBTM_INQ_RESULTS_CB*)NULL;
-    p_inq->p_inq_ble_cmpl_cb = (tBTM_CMPL_CB*)NULL;
+    p_inq->p_inq_ble_results_cb = NULL;
+    p_inq->p_inq_ble_cmpl_cb = NULL;
     p_inq->scan_type = INQ_NONE;
   }
 
@@ -1975,9 +1883,9 @@ void btm_process_inq_complete(uint8_t status, uint8_t mode) {
       }
 
       /* Clear the results callback if set */
-      p_inq->p_inq_results_cb = (tBTM_INQ_RESULTS_CB*)NULL;
+      p_inq->p_inq_results_cb = NULL;
       p_inq->inq_active = BTM_INQUIRY_INACTIVE;
-      p_inq->p_inq_cmpl_cb = (tBTM_CMPL_CB*)NULL;
+      p_inq->p_inq_cmpl_cb = NULL;
 
       /* If we have a callback registered for inquiry complete, call it */
       BTM_TRACE_DEBUG("BTM Inq Compl Callback: status 0x%02x, num results %d",
@@ -1986,16 +1894,6 @@ void btm_process_inq_complete(uint8_t status, uint8_t mode) {
 
       if (p_inq_cb) (p_inq_cb)((tBTM_INQUIRY_CMPL*)&p_inq->inq_cmpl_info);
     }
-#if (BTA_HOST_INTERLEAVE_SEARCH == TRUE)
-    if (p_inq->inqparms.mode != 0 &&
-        !(p_inq->inq_active & BTM_PERIODIC_INQUIRY_ACTIVE)) {
-      /* make inquiry inactive for next iteration */
-      p_inq->inq_active = BTM_INQUIRY_INACTIVE;
-      /* call the inquiry again */
-      BTM_StartInquiry(&p_inq->inqparms, p_inq->p_inq_results_cb,
-                       p_inq->p_inq_cmpl_cb);
-    }
-#endif
   }
   if (p_inq->inqparms.mode == 0 &&
       p_inq->scan_type == INQ_GENERAL)  // this inquiry is complete

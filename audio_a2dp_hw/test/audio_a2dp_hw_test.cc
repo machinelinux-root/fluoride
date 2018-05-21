@@ -36,6 +36,10 @@ static uint32_t codec_sample_rate2value(
       return 176400;
     case BTAV_A2DP_CODEC_SAMPLE_RATE_192000:
       return 192000;
+    case BTAV_A2DP_CODEC_SAMPLE_RATE_16000:
+      return 16000;
+    case BTAV_A2DP_CODEC_SAMPLE_RATE_24000:
+      return 24000;
     case BTAV_A2DP_CODEC_SAMPLE_RATE_NONE:
       break;
   }

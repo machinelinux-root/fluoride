@@ -97,24 +97,33 @@ typedef struct {
   uint16_t handles[BTA_GATTC_MULTI_MAX];
 } tBTA_GATTC_MULTI;
 
-enum {
-  BTA_GATTC_ATTR_TYPE_INCL_SRVC,
-  BTA_GATTC_ATTR_TYPE_CHAR,
-  BTA_GATTC_ATTR_TYPE_CHAR_DESCR,
-  BTA_GATTC_ATTR_TYPE_SRVC
-};
-typedef uint8_t tBTA_GATTC_ATTR_TYPE;
+/* Representation of GATT attribute for storage */
+struct tBTA_GATTC_NV_ATTR {
+  uint16_t handle;
+  bluetooth::Uuid type;
 
-typedef struct {
-  bluetooth::Uuid uuid;
-  uint16_t s_handle;
-  uint16_t e_handle; /* used for service only */
-  uint8_t attr_type;
-  uint8_t id;
-  uint8_t prop;              /* used when attribute type is characteristic */
-  bool is_primary;           /* used when attribute type is service */
-  uint16_t incl_srvc_handle; /* used when attribute type is included service */
-} tBTA_GATTC_NV_ATTR;
+  union {
+    /* primary or secondary service */
+    struct {
+      bluetooth::Uuid uuid;
+      uint16_t e_handle;
+    } service;
+
+    struct {
+      uint16_t s_handle;
+      uint16_t e_handle;
+      bluetooth::Uuid uuid;
+    } included_service;
+
+    struct {
+      uint8_t properties;
+      uint16_t value_handle;
+      bluetooth::Uuid uuid;
+    } characteristic;
+
+    /* for descriptor we don't store value*/
+  } value;
+};
 
 /* callback data structure */
 typedef struct {
@@ -378,7 +387,7 @@ struct tBTA_GATTC_CHARACTERISTIC;
 struct tBTA_GATTC_DESCRIPTOR;
 struct tBTA_GATTC_INCLUDED_SVC;
 
-typedef struct {
+struct tBTA_GATTC_SERVICE {
   bluetooth::Uuid uuid;
   bool is_primary;
   uint16_t handle;
@@ -386,7 +395,7 @@ typedef struct {
   uint16_t e_handle;
   std::vector<tBTA_GATTC_CHARACTERISTIC> characteristics;
   std::vector<tBTA_GATTC_INCLUDED_SVC> included_svc;
-} __attribute__((packed, aligned(alignof(bluetooth::Uuid)))) tBTA_GATTC_SERVICE;
+};
 
 struct tBTA_GATTC_CHARACTERISTIC {
   bluetooth::Uuid uuid;
@@ -395,19 +404,19 @@ struct tBTA_GATTC_CHARACTERISTIC {
   uint16_t value_handle;
   tGATT_CHAR_PROP properties;
   std::vector<tBTA_GATTC_DESCRIPTOR> descriptors;
-} __attribute__((packed, aligned(alignof(bluetooth::Uuid))));
+};
 
 struct tBTA_GATTC_DESCRIPTOR {
   bluetooth::Uuid uuid;
   uint16_t handle;
-} __attribute__((packed));
+};
 
 struct tBTA_GATTC_INCLUDED_SVC {
   bluetooth::Uuid uuid;
   uint16_t handle;
   tBTA_GATTC_SERVICE* owning_service; /* owning service*/
   tBTA_GATTC_SERVICE* included_service;
-} __attribute__((packed));
+};
 
 /*****************************************************************************
  *  External Function Declarations
@@ -891,8 +900,13 @@ extern void BTA_GATTS_AppDeregister(tGATT_IF server_if);
  *                  service cannot be added.
  *
  ******************************************************************************/
-extern uint16_t BTA_GATTS_AddService(tGATT_IF server_if,
-                                     std::vector<btgatt_db_element_t>& service);
+typedef base::Callback<void(uint8_t status, int server_if,
+                            std::vector<btgatt_db_element_t> service)>
+    BTA_GATTS_AddServiceCb;
+
+extern void BTA_GATTS_AddService(tGATT_IF server_if,
+                                 std::vector<btgatt_db_element_t> service,
+                                 BTA_GATTS_AddServiceCb cb);
 
 /*******************************************************************************
  *
