@@ -26,6 +26,7 @@
 #include "avrcp_packet.h"
 #include "avrcp_test_helper.h"
 #include "device.h"
+#include "stack_config.h"
 #include "tests/avrcp/avrcp_test_packets.h"
 #include "tests/packet_test_helper.h"
 
@@ -44,6 +45,12 @@ using ::testing::MockFunction;
 using ::testing::Mock;
 using ::testing::NiceMock;
 using ::testing::Return;
+
+bool get_pts_avrcp_test(void) { return false; }
+
+const stack_config_t interface = {
+    nullptr, get_pts_avrcp_test, nullptr, nullptr, nullptr, nullptr, nullptr,
+    nullptr};
 
 // TODO (apanicke): All the tests below are just basic positive unit tests.
 // Add more tests to increase code coverage.
@@ -706,6 +713,23 @@ TEST_F(AvrcpDeviceTest, setAddressedPlayerTest) {
 
   test_device->RegisterInterfaces(&interface, &a2dp_interface, nullptr);
 
+  MediaPlayerInfo info = {0, "Test Player", true};
+  std::vector<MediaPlayerInfo> list = {info};
+
+  EXPECT_CALL(interface, GetMediaPlayerList(_))
+      .WillRepeatedly(InvokeCb<0>(0, list));
+
+  auto set_addr_player_rej_rsp = RejectBuilder::MakeBuilder(
+      CommandPdu::SET_ADDRESSED_PLAYER, Status::INVALID_PLAYER_ID);
+
+  EXPECT_CALL(response_cb,
+              Call(1, false, matchPacket(std::move(set_addr_player_rej_rsp))))
+      .Times(1);
+
+  auto player_id_1_request =
+      TestAvrcpPacket::Make(set_addressed_player_id_1_request);
+  SendMessage(1, player_id_1_request);
+
   auto set_addr_player_rsp =
       SetAddressedPlayerResponseBuilder::MakeBuilder(Status::NO_ERROR);
 
@@ -1024,5 +1048,25 @@ TEST_F(AvrcpDeviceTest, getInvalidItemAttributesTest) {
   SendBrowseMessage(1, request);
 }
 
+TEST_F(AvrcpDeviceTest, invalidRegisterNotificationTest) {
+  MockMediaInterface interface;
+  NiceMock<MockA2dpInterface> a2dp_interface;
+
+  test_device->RegisterInterfaces(&interface, &a2dp_interface, nullptr);
+
+  auto reg_notif_rej_rsp = RejectBuilder::MakeBuilder(
+      CommandPdu::REGISTER_NOTIFICATION, Status::INVALID_PARAMETER);
+  EXPECT_CALL(response_cb,
+              Call(1, false, matchPacket(std::move(reg_notif_rej_rsp))))
+      .Times(1);
+
+  auto reg_notif_request = TestAvrcpPacket::Make(register_notification_invalid);
+  SendMessage(1, reg_notif_request);
+}
+
 }  // namespace avrcp
 }  // namespace bluetooth
+
+const stack_config_t* stack_config_get_interface(void) {
+  return &bluetooth::avrcp::interface;
+}

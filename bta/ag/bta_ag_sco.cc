@@ -370,6 +370,12 @@ static void bta_ag_create_sco(tBTA_AG_SCB* p_scb, bool is_orig) {
   if (!bta_ag_sco_is_active_device(p_scb->peer_addr)) {
     LOG(WARNING) << __func__ << ": device " << p_scb->peer_addr
                  << " is not active, active_device=" << active_device_addr;
+    if (bta_ag_cb.sco.p_curr_scb != nullptr &&
+        bta_ag_cb.sco.p_curr_scb->in_use && p_scb == bta_ag_cb.sco.p_curr_scb) {
+      do_in_bta_thread(
+          FROM_HERE, base::Bind(&bta_ag_sm_execute, p_scb, BTA_AG_SCO_CLOSE_EVT,
+                                tBTA_AG_DATA::kEmpty));
+    }
     return;
   }
   /* Make sure this SCO handle is not already in use */
@@ -554,6 +560,14 @@ static void bta_ag_codec_negotiation_timer_cback(void* data) {
 void bta_ag_codec_negotiate(tBTA_AG_SCB* p_scb) {
   APPL_TRACE_DEBUG("%s", __func__);
   bta_ag_cb.sco.p_curr_scb = p_scb;
+
+  // Workaround for misbehaving HFs such as Sony XAV AX100 car kit and Sony
+  // MW600 Headset, which indicate WBS support in SDP, but no codec
+  // negotiation support in BRSF. In this case, using mSBC codec can result
+  // background noise or no audio. Thus, defaulting to CVSD instead.
+  if (!(p_scb->peer_features & BTA_AG_PEER_FEAT_CODEC)) {
+    p_scb->sco_codec = UUID_CODEC_CVSD;
+  }
 
   if ((p_scb->codec_updated || p_scb->codec_fallback) &&
       (p_scb->peer_features & BTA_AG_PEER_FEAT_CODEC)) {
@@ -1157,7 +1171,7 @@ void bta_ag_sco_listen(tBTA_AG_SCB* p_scb,
  ******************************************************************************/
 void bta_ag_sco_open(tBTA_AG_SCB* p_scb, UNUSED_ATTR const tBTA_AG_DATA& data) {
   if (!sco_allowed) {
-    APPL_TRACE_DEBUG("%s not opening sco, by policy", __func__);
+    LOG(INFO) << __func__ << ": not opening sco, by policy";
     return;
   }
   /* if another scb using sco, this is a transfer */

@@ -42,11 +42,8 @@
 #include "l2c_int.h"
 #include "osi/include/log.h"
 #include "osi/include/osi.h"
-#include "smp_api.h"
+#include "stack/crypto_toolbox/crypto_toolbox.h"
 
-extern bool aes_cipher_msg_auth_code(BT_OCTET16 key, uint8_t* input,
-                                     uint16_t length, uint16_t tlen,
-                                     uint8_t* p_signature);
 extern void gatt_notify_phy_updated(uint8_t status, uint16_t handle,
                                     uint8_t tx_phy, uint8_t rx_phy);
 extern void btm_ble_advertiser_notify_terminated_legacy(
@@ -184,8 +181,7 @@ void BTM_BleLoadLocalKeys(uint8_t key_type, tBTM_BLE_LOCAL_KEYS* p_key) {
         break;
 
       case BTM_BLE_KEY_TYPE_ER:
-        memcpy(p_devcb->ble_encryption_key_value, p_key->er,
-               sizeof(BT_OCTET16));
+        p_devcb->ble_encryption_key_value = p_key->er;
         break;
 
       default:
@@ -195,54 +191,16 @@ void BTM_BleLoadLocalKeys(uint8_t key_type, tBTM_BLE_LOCAL_KEYS* p_key) {
   }
 }
 
-/*******************************************************************************
- *
- * Function         BTM_GetDeviceEncRoot
- *
- * Description      This function is called to read the local device encryption
- *                  root.
- *
- * Returns          void
- *                  the local device ER is copied into ble_encr_key_value
- *
- ******************************************************************************/
-void BTM_GetDeviceEncRoot(BT_OCTET16 ble_encr_key_value) {
-  BTM_TRACE_DEBUG("%s", __func__);
-  memcpy(ble_encr_key_value, btm_cb.devcb.ble_encryption_key_value,
-         BT_OCTET16_LEN);
+/** Returns local device encryption root (ER) */
+const Octet16& BTM_GetDeviceEncRoot() {
+  return btm_cb.devcb.ble_encryption_key_value;
 }
 
-/*******************************************************************************
- *
- * Function         BTM_GetDeviceIDRoot
- *
- * Description      This function is called to read the local device identity
- *                  root.
- *
- * Returns          void
- *                  the local device IR is copied into irk
- *
- ******************************************************************************/
-void BTM_GetDeviceIDRoot(BT_OCTET16 irk) {
-  BTM_TRACE_DEBUG("BTM_GetDeviceIDRoot ");
+/** Returns local device identity root (IR). */
+const Octet16& BTM_GetDeviceIDRoot() { return btm_cb.devcb.id_keys.irk; }
 
-  memcpy(irk, btm_cb.devcb.id_keys.irk, BT_OCTET16_LEN);
-}
-
-/*******************************************************************************
- *
- * Function         BTM_GetDeviceDHK
- *
- * Description      This function is called to read the local device DHK.
- *
- * Returns          void
- *                  the local device DHK is copied into dhk
- *
- ******************************************************************************/
-void BTM_GetDeviceDHK(BT_OCTET16 dhk) {
-  BTM_TRACE_DEBUG("BTM_GetDeviceDHK");
-  memcpy(dhk, btm_cb.devcb.id_keys.dhk, BT_OCTET16_LEN);
-}
+/** Return local device DHK. */
+const Octet16& BTM_GetDeviceDHK() { return btm_cb.devcb.id_keys.dhk; }
 
 /*******************************************************************************
  *
@@ -475,8 +433,8 @@ void BTM_BleSecureConnectionOobDataReply(const RawAddress& bd_addr,
   memset(&oob, 0, sizeof(tSMP_SC_OOB_DATA));
 
   oob.peer_oob_data.present = true;
-  memcpy(&oob.peer_oob_data.randomizer, p_r, BT_OCTET16_LEN);
-  memcpy(&oob.peer_oob_data.commitment, p_c, BT_OCTET16_LEN);
+  memcpy(&oob.peer_oob_data.randomizer, p_r, OCTET16_LEN);
+  memcpy(&oob.peer_oob_data.commitment, p_c, OCTET16_LEN);
   oob.peer_oob_data.addr_rcvd_from.type = p_dev_rec->ble.ble_addr_type;
   oob.peer_oob_data.addr_rcvd_from.bda = bd_addr;
 
@@ -795,6 +753,7 @@ bool BTM_UseLeLink(const RawAddress& bd_addr) {
 tBTM_STATUS BTM_SetBleDataLength(const RawAddress& bd_addr,
                                  uint16_t tx_pdu_length) {
   tACL_CONN* p_acl = btm_bda_to_acl(bd_addr, BT_TRANSPORT_LE);
+  uint16_t tx_time = BTM_BLE_DATA_TX_TIME_MAX_LEGACY;
 
   if (p_acl == NULL) {
     BTM_TRACE_ERROR("%s: Wrong mode: no LE link exist or LE not supported",
@@ -819,9 +778,10 @@ tBTM_STATUS BTM_SetBleDataLength(const RawAddress& bd_addr,
   else if (tx_pdu_length < BTM_BLE_DATA_SIZE_MIN)
     tx_pdu_length = BTM_BLE_DATA_SIZE_MIN;
 
-  /* always set the TxTime to be max, as controller does not care for now */
-  btsnd_hcic_ble_set_data_length(p_acl->hci_handle, tx_pdu_length,
-                                 BTM_BLE_DATA_TX_TIME_MAX);
+  if (controller_get_interface()->get_bt_version()->hci_version >= HCI_PROTO_VERSION_5_0)
+    tx_time = BTM_BLE_DATA_TX_TIME_MAX;
+
+  btsnd_hcic_ble_set_data_length(p_acl->hci_handle, tx_pdu_length, tx_time);
 
   return BTM_SUCCESS;
 }
@@ -1177,7 +1137,7 @@ void btm_ble_rand_enc_complete(uint8_t* p, uint16_t op_code,
       if (op_code == HCI_BLE_RAND)
         params.param_len = BT_OCTET8_LEN;
       else
-        params.param_len = BT_OCTET16_LEN;
+        params.param_len = OCTET16_LEN;
 
       /* Fetch return info from HCI event message */
       memcpy(p_dest, p, params.param_len);
@@ -1278,7 +1238,6 @@ void btm_sec_save_le_key(const RawAddress& bd_addr, tBTM_LE_KEY_TYPE key_type,
                          tBTM_LE_KEY_VALUE* p_keys, bool pass_to_application) {
   tBTM_SEC_DEV_REC* p_rec;
   tBTM_LE_EVT_DATA cb_data;
-  uint8_t i;
 
   BTM_TRACE_DEBUG("btm_sec_save_le_key key_type=0x%x pass_to_application=%d",
                   key_type, pass_to_application);
@@ -1292,7 +1251,7 @@ void btm_sec_save_le_key(const RawAddress& bd_addr, tBTM_LE_KEY_TYPE key_type,
 
     switch (key_type) {
       case BTM_LE_KEY_PENC:
-        memcpy(p_rec->ble.keys.pltk, p_keys->penc_key.ltk, BT_OCTET16_LEN);
+        p_rec->ble.keys.pltk = p_keys->penc_key.ltk;
         memcpy(p_rec->ble.keys.rand, p_keys->penc_key.rand, BT_OCTET8_LEN);
         p_rec->ble.keys.sec_level = p_keys->penc_key.sec_level;
         p_rec->ble.keys.ediv = p_keys->penc_key.ediv;
@@ -1309,12 +1268,7 @@ void btm_sec_save_le_key(const RawAddress& bd_addr, tBTM_LE_KEY_TYPE key_type,
         break;
 
       case BTM_LE_KEY_PID:
-        for (i = 0; i < BT_OCTET16_LEN; i++) {
-          p_rec->ble.keys.irk[i] = p_keys->pid_key.irk[i];
-        }
-
-        // memcpy( p_rec->ble.keys.irk, p_keys->pid_key, BT_OCTET16_LEN); todo
-        // will crash the system
+        p_rec->ble.keys.irk = p_keys->pid_key.irk;
         p_rec->ble.static_addr = p_keys->pid_key.static_addr;
         p_rec->ble.static_addr_type = p_keys->pid_key.addr_type;
         p_rec->ble.key_type |= BTM_LE_KEY_PID;
@@ -1330,7 +1284,7 @@ void btm_sec_save_le_key(const RawAddress& bd_addr, tBTM_LE_KEY_TYPE key_type,
         break;
 
       case BTM_LE_KEY_PCSRK:
-        memcpy(p_rec->ble.keys.pcsrk, p_keys->pcsrk_key.csrk, BT_OCTET16_LEN);
+        p_rec->ble.keys.pcsrk = p_keys->pcsrk_key.csrk;
         p_rec->ble.keys.srk_sec_level = p_keys->pcsrk_key.sec_level;
         p_rec->ble.keys.counter = p_keys->pcsrk_key.counter;
         p_rec->ble.key_type |= BTM_LE_KEY_PCSRK;
@@ -1348,7 +1302,7 @@ void btm_sec_save_le_key(const RawAddress& bd_addr, tBTM_LE_KEY_TYPE key_type,
         break;
 
       case BTM_LE_KEY_LENC:
-        memcpy(p_rec->ble.keys.lltk, p_keys->lenc_key.ltk, BT_OCTET16_LEN);
+        p_rec->ble.keys.lltk = p_keys->lenc_key.ltk;
         p_rec->ble.keys.div = p_keys->lenc_key.div; /* update DIV */
         p_rec->ble.keys.sec_level = p_keys->lenc_key.sec_level;
         p_rec->ble.keys.key_size = p_keys->lenc_key.key_size;
@@ -1362,7 +1316,7 @@ void btm_sec_save_le_key(const RawAddress& bd_addr, tBTM_LE_KEY_TYPE key_type,
         break;
 
       case BTM_LE_KEY_LCSRK: /* local CSRK has been delivered */
-        memcpy(p_rec->ble.keys.lcsrk, p_keys->lcsrk_key.csrk, BT_OCTET16_LEN);
+        p_rec->ble.keys.lcsrk = p_keys->lcsrk_key.csrk;
         p_rec->ble.keys.div = p_keys->lcsrk_key.div; /* update DIV */
         p_rec->ble.keys.local_csrk_sec_level = p_keys->lcsrk_key.sec_level;
         p_rec->ble.keys.local_counter = p_keys->lcsrk_key.counter;
@@ -1601,7 +1555,6 @@ tBTM_STATUS btm_ble_set_encryption(const RawAddress& bd_addr,
 void btm_ble_ltk_request(uint16_t handle, uint8_t rand[8], uint16_t ediv) {
   tBTM_CB* p_cb = &btm_cb;
   tBTM_SEC_DEV_REC* p_dev_rec = btm_find_dev_by_handle(handle);
-  BT_OCTET8 dummy_stk = {0};
 
   BTM_TRACE_DEBUG("btm_ble_ltk_request");
 
@@ -1610,23 +1563,17 @@ void btm_ble_ltk_request(uint16_t handle, uint8_t rand[8], uint16_t ediv) {
   memcpy(p_cb->enc_rand, rand, BT_OCTET8_LEN);
 
   if (p_dev_rec != NULL) {
-    if (!smp_proc_ltk_request(p_dev_rec->bd_addr))
-      btm_ble_ltk_request_reply(p_dev_rec->bd_addr, false, dummy_stk);
+    if (!smp_proc_ltk_request(p_dev_rec->bd_addr)) {
+      btm_ble_ltk_request_reply(p_dev_rec->bd_addr, false, Octet16{0});
+    }
   }
 }
 
-/*******************************************************************************
- *
- * Function         btm_ble_start_encrypt
- *
- * Description      This function is called to start LE encryption.
- *
- *
- * Returns          BTM_SUCCESS if encryption was started successfully
- *
- ******************************************************************************/
+/** This function is called to start LE encryption.
+ * Returns BTM_SUCCESS if encryption was started successfully
+ */
 tBTM_STATUS btm_ble_start_encrypt(const RawAddress& bda, bool use_stk,
-                                  BT_OCTET16 stk) {
+                                  Octet16* p_stk) {
   tBTM_CB* p_cb = &btm_cb;
   tBTM_SEC_DEV_REC* p_rec = btm_find_dev(bda);
   BT_OCTET8 dummy_rand = {0};
@@ -1646,7 +1593,7 @@ tBTM_STATUS btm_ble_start_encrypt(const RawAddress& bda, bool use_stk,
   p_cb->enc_handle = p_rec->ble_hci_handle;
 
   if (use_stk) {
-    btsnd_hcic_ble_start_enc(p_rec->ble_hci_handle, dummy_rand, 0, stk);
+    btsnd_hcic_ble_start_enc(p_rec->ble_hci_handle, dummy_rand, 0, *p_stk);
   } else if (p_rec->ble.key_type & BTM_LE_KEY_PENC) {
     btsnd_hcic_ble_start_enc(p_rec->ble_hci_handle, p_rec->ble.keys.rand,
                              p_rec->ble.keys.ediv, p_rec->ble.keys.pltk);
@@ -1716,7 +1663,7 @@ void btm_ble_link_encrypted(const RawAddress& bd_addr, uint8_t encr_enable) {
  *
  ******************************************************************************/
 void btm_ble_ltk_request_reply(const RawAddress& bda, bool use_stk,
-                               BT_OCTET16 stk) {
+                               const Octet16& stk) {
   tBTM_SEC_DEV_REC* p_rec = btm_find_dev(bda);
   tBTM_CB* p_cb = &btm_cb;
 
@@ -2016,9 +1963,20 @@ void btm_ble_conn_complete(uint8_t* p, UNUSED_ATTR uint16_t evt_len,
  *
  *****************************************************************************/
 void btm_ble_create_ll_conn_complete(uint8_t status) {
-  if (status != HCI_SUCCESS) {
-    btm_ble_set_conn_st(BLE_CONN_IDLE);
-    btm_ble_update_mode_operation(HCI_ROLE_UNKNOWN, NULL, status);
+  if (status == HCI_SUCCESS) return;
+
+  btm_ble_set_conn_st(BLE_CONN_IDLE);
+  btm_ble_update_mode_operation(HCI_ROLE_UNKNOWN, NULL, status);
+
+  LOG(WARNING) << "LE Create Connection attempt failed, status="
+               << loghex(status);
+
+  if (status == HCI_ERR_COMMAND_DISALLOWED) {
+    /* There is already either direct connect, or whitelist connection
+     * pending, but we don't know which one, or to which state should we
+     * transition now. This can be triggered only in case of rare race
+     * condition. Crash to recover. */
+    LOG(FATAL) << "LE Create Connection - command disallowed";
   }
 }
 /*****************************************************************************
@@ -2166,45 +2124,42 @@ bool BTM_BleDataSignature(const RawAddress& bd_addr, uint8_t* p_text,
   tBTM_SEC_DEV_REC* p_rec = btm_find_dev(bd_addr);
 
   BTM_TRACE_DEBUG("%s", __func__);
-  bool ret = false;
   if (p_rec == NULL) {
     BTM_TRACE_ERROR("%s-data signing can not be done from unknown device",
                     __func__);
-  } else {
-    uint8_t* p_mac = (uint8_t*)signature;
-    uint8_t* pp;
-    uint8_t* p_buf = (uint8_t*)osi_malloc(len + 4);
-
-    BTM_TRACE_DEBUG("%s-Start to generate Local CSRK", __func__);
-    pp = p_buf;
-    /* prepare plain text */
-    if (p_text) {
-      memcpy(p_buf, p_text, len);
-      pp = (p_buf + len);
-    }
-
-    UINT32_TO_STREAM(pp, p_rec->ble.keys.local_counter);
-    UINT32_TO_STREAM(p_mac, p_rec->ble.keys.local_counter);
-
-    ret = aes_cipher_msg_auth_code(p_rec->ble.keys.lcsrk, p_buf,
-                                   (uint16_t)(len + 4), BTM_CMAC_TLEN_SIZE,
-                                   p_mac);
-    if (ret) {
-      btm_ble_increment_sign_ctr(bd_addr, true);
-    }
-
-    BTM_TRACE_DEBUG("%s p_mac = %d", __func__, p_mac);
-    BTM_TRACE_DEBUG(
-        "p_mac[0] = 0x%02x p_mac[1] = 0x%02x p_mac[2] = 0x%02x p_mac[3] = "
-        "0x%02x",
-        *p_mac, *(p_mac + 1), *(p_mac + 2), *(p_mac + 3));
-    BTM_TRACE_DEBUG(
-        "p_mac[4] = 0x%02x p_mac[5] = 0x%02x p_mac[6] = 0x%02x p_mac[7] = "
-        "0x%02x",
-        *(p_mac + 4), *(p_mac + 5), *(p_mac + 6), *(p_mac + 7));
-    osi_free(p_buf);
+    return false;
   }
-  return ret;
+
+  uint8_t* p_mac = (uint8_t*)signature;
+  uint8_t* pp;
+  uint8_t* p_buf = (uint8_t*)osi_malloc(len + 4);
+
+  BTM_TRACE_DEBUG("%s-Start to generate Local CSRK", __func__);
+  pp = p_buf;
+  /* prepare plain text */
+  if (p_text) {
+    memcpy(p_buf, p_text, len);
+    pp = (p_buf + len);
+  }
+
+  UINT32_TO_STREAM(pp, p_rec->ble.keys.local_counter);
+  UINT32_TO_STREAM(p_mac, p_rec->ble.keys.local_counter);
+
+  crypto_toolbox::aes_cmac(p_rec->ble.keys.lcsrk, p_buf, (uint16_t)(len + 4),
+                           BTM_CMAC_TLEN_SIZE, p_mac);
+  btm_ble_increment_sign_ctr(bd_addr, true);
+
+  BTM_TRACE_DEBUG("%s p_mac = %d", __func__, p_mac);
+  BTM_TRACE_DEBUG(
+      "p_mac[0] = 0x%02x p_mac[1] = 0x%02x p_mac[2] = 0x%02x p_mac[3] = "
+      "0x%02x",
+      *p_mac, *(p_mac + 1), *(p_mac + 2), *(p_mac + 3));
+  BTM_TRACE_DEBUG(
+      "p_mac[4] = 0x%02x p_mac[5] = 0x%02x p_mac[6] = 0x%02x p_mac[7] = "
+      "0x%02x",
+      *(p_mac + 4), *(p_mac + 5), *(p_mac + 6), *(p_mac + 7));
+  osi_free(p_buf);
+  return true;
 }
 
 /*******************************************************************************
@@ -2238,12 +2193,11 @@ bool BTM_BleVerifySignature(const RawAddress& bd_addr, uint8_t* p_orig,
     BTM_TRACE_DEBUG("%s rcv_cnt=%d >= expected_cnt=%d", __func__, counter,
                     p_rec->ble.keys.counter);
 
-    if (aes_cipher_msg_auth_code(p_rec->ble.keys.pcsrk, p_orig, len,
-                                 BTM_CMAC_TLEN_SIZE, p_mac)) {
-      if (memcmp(p_mac, p_comp, BTM_CMAC_TLEN_SIZE) == 0) {
-        btm_ble_increment_sign_ctr(bd_addr, false);
-        verified = true;
-      }
+    crypto_toolbox::aes_cmac(p_rec->ble.keys.pcsrk, p_orig, len,
+                             BTM_CMAC_TLEN_SIZE, p_mac);
+    if (memcmp(p_mac, p_comp, BTM_CMAC_TLEN_SIZE) == 0) {
+      btm_ble_increment_sign_ctr(bd_addr, false);
+      verified = true;
     }
   }
   return verified;
@@ -2377,16 +2331,7 @@ extern uint8_t BTM_BleGetSupportedKeySize(const RawAddress& bd_addr) {
 /*******************************************************************************
  *  Utility functions for LE device IR/ER generation
  ******************************************************************************/
-/*******************************************************************************
- *
- * Function         btm_notify_new_key
- *
- * Description      This function is to notify application new keys have been
- *                  generated.
- *
- * Returns          void
- *
- ******************************************************************************/
+/** This function is to notify application new keys have been generated. */
 static void btm_notify_new_key(uint8_t key_type) {
   tBTM_BLE_LOCAL_KEYS* p_local_keys = NULL;
 
@@ -2414,112 +2359,67 @@ static void btm_notify_new_key(uint8_t key_type) {
   }
 }
 
-/*******************************************************************************
- *
- * Function         btm_ble_process_irk
- *
- * Description      This function is called when IRK is generated, store it in
- *                  local control block.
- *
- * Returns          void
- *
- ******************************************************************************/
-static void btm_ble_process_irk(tSMP_ENC* p) {
-  BTM_TRACE_DEBUG("btm_ble_process_irk");
-  if (p && p->opcode == HCI_BLE_ENCRYPT) {
-    memcpy(btm_cb.devcb.id_keys.irk, p->param_buf, BT_OCTET16_LEN);
-    btm_notify_new_key(BTM_BLE_KEY_TYPE_ID);
+/** implementation of btm_ble_reset_id */
+static void btm_ble_reset_id_impl(const Octet16& rand1, const Octet16& rand2) {
+  /* Regenerate Identity Root */
+  btm_cb.devcb.id_keys.ir = rand1;
+  uint8_t btm_ble_dhk_pt = 0x03;
+
+  /* generate DHK= Eir({0x03, 0x00, 0x00 ...}) */
+  btm_cb.devcb.id_keys.dhk =
+      crypto_toolbox::aes_128(btm_cb.devcb.id_keys.ir, &btm_ble_dhk_pt, 1);
+
+  uint8_t btm_ble_irk_pt = 0x01;
+  /* IRK = D1(IR, 1) */
+  btm_cb.devcb.id_keys.irk =
+      crypto_toolbox::aes_128(btm_cb.devcb.id_keys.ir, &btm_ble_irk_pt, 1);
+
+  btm_notify_new_key(BTM_BLE_KEY_TYPE_ID);
 
 #if (BLE_PRIVACY_SPT == TRUE)
-    /* if privacy is enabled, new RPA should be calculated */
-    if (btm_cb.ble_ctr_cb.privacy_mode != BTM_PRIVACY_NONE) {
-      btm_gen_resolvable_private_addr(base::Bind(&btm_gen_resolve_paddr_low));
-    }
-#endif
-  } else {
-    BTM_TRACE_ERROR("Generating IRK exception.");
+  /* if privacy is enabled, new RPA should be calculated */
+  if (btm_cb.ble_ctr_cb.privacy_mode != BTM_PRIVACY_NONE) {
+    btm_gen_resolvable_private_addr(base::Bind(&btm_gen_resolve_paddr_low));
   }
+#endif
 
   /* proceed generate ER */
-  btsnd_hcic_ble_rand(base::Bind([](BT_OCTET8 rand1) {
-    memcpy(&btm_cb.devcb.ble_encryption_key_value[0], rand1, BT_OCTET8_LEN);
-
-    btsnd_hcic_ble_rand(base::Bind([](BT_OCTET8 rand2) {
-      memcpy(&btm_cb.devcb.ble_encryption_key_value[8], rand2, BT_OCTET8_LEN);
-      btm_notify_new_key(BTM_BLE_KEY_TYPE_ER);
-    }));
-
-  }));
+  btm_cb.devcb.ble_encryption_key_value = rand2;
+  btm_notify_new_key(BTM_BLE_KEY_TYPE_ER);
 }
 
-/*******************************************************************************
- *
- * Function         btm_ble_process_dhk
- *
- * Description      This function is called when DHK is calculated, store it in
- *                  local control block, and proceed to generate ER, a 128-bits
- *                  random number.
- *
- * Returns          void
- *
- ******************************************************************************/
-static void btm_ble_process_dhk(tSMP_ENC* p) {
-  uint8_t btm_ble_irk_pt = 0x01;
-  tSMP_ENC output;
+struct reset_id_data {
+  Octet16 rand1;
+  Octet16 rand2;
+};
 
-  BTM_TRACE_DEBUG("btm_ble_process_dhk");
-
-  if (p && p->opcode == HCI_BLE_ENCRYPT) {
-    memcpy(btm_cb.devcb.id_keys.dhk, p->param_buf, BT_OCTET16_LEN);
-    BTM_TRACE_DEBUG("BLE DHK generated.");
-
-    /* IRK = D1(IR, 1) */
-    if (!SMP_Encrypt(btm_cb.devcb.id_keys.ir, BT_OCTET16_LEN, &btm_ble_irk_pt,
-                     1, &output)) {
-      /* reset all identity root related key */
-      memset(&btm_cb.devcb.id_keys, 0, sizeof(tBTM_BLE_LOCAL_ID_KEYS));
-    } else {
-      btm_ble_process_irk(&output);
-    }
-  } else {
-    /* reset all identity root related key */
-    memset(&btm_cb.devcb.id_keys, 0, sizeof(tBTM_BLE_LOCAL_ID_KEYS));
-  }
-}
-
-/*******************************************************************************
- *
- * Function         btm_ble_reset_id
- *
- * Description      This function is called to reset LE device identity.
- *
- * Returns          void
- *
- ******************************************************************************/
+/** This function is called to reset LE device identity. */
 void btm_ble_reset_id(void) {
   BTM_TRACE_DEBUG("btm_ble_reset_id");
 
-  /* Regenerate Identity Root*/
+  /* In order to reset identity, we need four random numbers. Make four nested
+   * calls to generate them first, then proceed to perform the actual reset in
+   * btm_ble_reset_id_impl. */
   btsnd_hcic_ble_rand(base::Bind([](BT_OCTET8 rand) {
-    BTM_TRACE_DEBUG("btm_ble_process_ir1");
-    memcpy(btm_cb.devcb.id_keys.ir, rand, BT_OCTET8_LEN);
-
-    btsnd_hcic_ble_rand(base::Bind([](BT_OCTET8 rand) {
-      uint8_t btm_ble_dhk_pt = 0x03;
-      tSMP_ENC output;
-
-      BTM_TRACE_DEBUG("btm_ble_process_ir2");
-
-      /* remembering in control block */
-      memcpy(&btm_cb.devcb.id_keys.ir[8], rand, BT_OCTET8_LEN);
-      /* generate DHK= Eir({0x03, 0x00, 0x00 ...}) */
-
-      SMP_Encrypt(btm_cb.devcb.id_keys.ir, BT_OCTET16_LEN, &btm_ble_dhk_pt, 1,
-                  &output);
-      btm_ble_process_dhk(&output);
-
-      BTM_TRACE_DEBUG("BLE IR generated.");
-    }));
+    reset_id_data tmp;
+    memcpy(tmp.rand1.data(), rand, BT_OCTET8_LEN);
+    btsnd_hcic_ble_rand(base::Bind(
+        [](reset_id_data tmp, BT_OCTET8 rand) {
+          memcpy(tmp.rand1.data() + 8, rand, BT_OCTET8_LEN);
+          btsnd_hcic_ble_rand(base::Bind(
+              [](reset_id_data tmp, BT_OCTET8 rand) {
+                memcpy(tmp.rand2.data(), rand, BT_OCTET8_LEN);
+                btsnd_hcic_ble_rand(base::Bind(
+                    [](reset_id_data tmp, BT_OCTET8 rand) {
+                      memcpy(tmp.rand2.data() + 8, rand, BT_OCTET8_LEN);
+                      // when all random numbers are ready, do the actual reset.
+                      btm_ble_reset_id_impl(tmp.rand1, tmp.rand2);
+                    },
+                    tmp));
+              },
+              tmp));
+        },
+        tmp));
   }));
 }
 

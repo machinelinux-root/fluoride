@@ -21,14 +21,16 @@
 #include <base/callback_forward.h>
 #include <hardware/bt_hearing_aid.h>
 
+constexpr uint16_t HA_INTERVAL_10_MS = 10;
+constexpr uint16_t HA_INTERVAL_20_MS = 20;
 
 /** Implementations of HearingAid will also implement this interface */
 class HearingAidAudioReceiver {
  public:
   virtual ~HearingAidAudioReceiver() = default;
   virtual void OnAudioDataReady(const std::vector<uint8_t>& data) = 0;
-  virtual void OnAudioSuspend();
-  virtual void OnAudioResume();
+  virtual void OnAudioSuspend() = 0;
+  virtual void OnAudioResume() = 0;
 };
 
 class HearingAid {
@@ -48,6 +50,8 @@ class HearingAid {
                              uint16_t volumeHandle, uint64_t hiSyncId,
                              uint16_t render_delay, uint16_t preparation_delay,
                              uint16_t is_white_listed);
+
+  static int GetDeviceCount();
 
   virtual void Connect(const RawAddress& address) = 0;
   virtual void Disconnect(const RawAddress& address) = 0;

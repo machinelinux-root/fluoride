@@ -72,7 +72,7 @@ static uint8_t bta_dm_pin_cback(const RawAddress& bd_addr, DEV_CLASS dev_class,
                                 BD_NAME bd_name, bool min_16_digit);
 static uint8_t bta_dm_new_link_key_cback(const RawAddress& bd_addr,
                                          DEV_CLASS dev_class, BD_NAME bd_name,
-                                         LINK_KEY key, uint8_t key_type);
+                                         const LinkKey& key, uint8_t key_type);
 static uint8_t bta_dm_authentication_complete_cback(const RawAddress& bd_addr,
                                                     DEV_CLASS dev_class,
                                                     BD_NAME bd_name,
@@ -343,7 +343,6 @@ static void bta_dm_sys_hw_cback(tBTA_SYS_HW_EVT status) {
   DEV_CLASS dev_class;
   tBTA_DM_SEC_CBACK* temp_cback;
   uint8_t key_mask = 0;
-  BT_OCTET16 er;
   tBTA_BLE_LOCAL_ID_KEYS id_key;
 
   APPL_TRACE_DEBUG("%s with event: %i", __func__, status);
@@ -406,7 +405,8 @@ static void bta_dm_sys_hw_cback(tBTA_SYS_HW_EVT status) {
     BTM_SetDeviceClass(dev_class);
 
     /* load BLE local information: ID keys, ER if available */
-    bta_dm_co_ble_load_local_keys(&key_mask, er, &id_key);
+    Octet16 er;
+    bta_dm_co_ble_load_local_keys(&key_mask, &er, &id_key);
 
     if (key_mask & BTA_BLE_LOCAL_KEY_TYPE_ER) {
       BTM_BleLoadLocalKeys(BTA_BLE_LOCAL_KEY_TYPE_ER,
@@ -705,11 +705,10 @@ void bta_dm_remove_device(const RawAddress& bd_addr) {
  * Description      This function adds a Link Key to an security database entry.
  *                  It is normally called during host startup to restore all
  *                  required information stored in the NVRAM.
- ***
  ******************************************************************************/
 void bta_dm_add_device(std::unique_ptr<tBTA_DM_API_ADD_DEVICE> msg) {
   uint8_t* p_dc = NULL;
-  uint8_t* p_lc = NULL;
+  LinkKey* p_lc = NULL;
   uint32_t trusted_services_mask[BTM_SEC_SERVICE_ARRAY_SIZE];
   uint8_t index = 0;
   uint8_t btm_mask_index = 0;
@@ -719,7 +718,7 @@ void bta_dm_add_device(std::unique_ptr<tBTA_DM_API_ADD_DEVICE> msg) {
   /* If not all zeros, the device class has been specified */
   if (msg->dc_known) p_dc = (uint8_t*)msg->dc;
 
-  if (msg->link_key_known) p_lc = (uint8_t*)msg->link_key;
+  if (msg->link_key_known) p_lc = &msg->link_key;
 
   if (msg->is_trusted) {
     /* covert BTA service mask to BTM mask */
@@ -2365,7 +2364,7 @@ static uint8_t bta_dm_pin_cback(const RawAddress& bd_addr, DEV_CLASS dev_class,
  ******************************************************************************/
 static uint8_t bta_dm_new_link_key_cback(const RawAddress& bd_addr,
                                          UNUSED_ATTR DEV_CLASS dev_class,
-                                         BD_NAME bd_name, LINK_KEY key,
+                                         BD_NAME bd_name, const LinkKey& key,
                                          uint8_t key_type) {
   tBTA_DM_SEC sec_event;
   tBTA_DM_AUTH_CMPL* p_auth_cmpl;
@@ -2382,12 +2381,10 @@ static uint8_t bta_dm_new_link_key_cback(const RawAddress& bd_addr,
 
     memcpy(p_auth_cmpl->bd_name, bd_name, (BD_NAME_LEN - 1));
     p_auth_cmpl->bd_name[BD_NAME_LEN - 1] = 0;
-
     p_auth_cmpl->key_present = true;
     p_auth_cmpl->key_type = key_type;
     p_auth_cmpl->success = true;
-
-    memcpy(p_auth_cmpl->key, key, LINK_KEY_LEN);
+    p_auth_cmpl->key = key;
     sec_event.auth_cmpl.fail_reason = HCI_SUCCESS;
 
     // Report the BR link key based on the BR/EDR address and type
@@ -2659,8 +2656,10 @@ static void handle_role_change(const RawAddress& bd_addr, uint8_t new_role,
 
   tBTA_DM_PEER_DEVICE* p_dev = bta_dm_find_peer_device(bd_addr);
   if (!p_dev) return;
-  APPL_TRACE_DEBUG("role chg info:x%x new_role:%d dev count:%d", p_dev->info,
-                   new_role, bta_dm_cb.device_list.count);
+  LOG_INFO(LOG_TAG,
+           "%s: peer %s info:0x%x new_role:0x%x dev count:%d hci_status=%d",
+           __func__, bd_addr.ToString().c_str(), p_dev->info, new_role,
+           bta_dm_cb.device_list.count, hci_status);
   if (p_dev->info & BTA_DM_DI_AV_ACTIVE) {
     bool need_policy_change = false;
 
@@ -3850,6 +3849,8 @@ static uint8_t bta_dm_ble_smp_cback(tBTM_LE_EVT event, const RawAddress& bda,
         bta_dm_remove_sec_dev_entry(bda);
       } else {
         sec_event.auth_cmpl.success = true;
+        if (!p_data->complt.smp_over_br)
+          GATT_ConfigServiceChangeCCC(bda, true, BT_TRANSPORT_LE);
       }
 
       if (bta_dm_cb.p_sec_cback) {
@@ -3967,6 +3968,9 @@ void bta_dm_ble_set_conn_params(const RawAddress& bd_addr,
                                 uint16_t conn_int_min, uint16_t conn_int_max,
                                 uint16_t slave_latency,
                                 uint16_t supervision_tout) {
+  L2CA_AdjustConnectionIntervals(&conn_int_min, &conn_int_max,
+                                 BTM_BLE_CONN_INT_MIN);
+
   BTM_BleSetPrefConnParams(bd_addr, conn_int_min, conn_int_max, slave_latency,
                            supervision_tout);
 }
@@ -3982,6 +3986,8 @@ void bta_dm_ble_update_conn_params(const RawAddress& bd_addr, uint16_t min_int,
                                    uint16_t max_int, uint16_t latency,
                                    uint16_t timeout, uint16_t min_ce_len,
                                    uint16_t max_ce_len) {
+  L2CA_AdjustConnectionIntervals(&min_int, &max_int, BTM_BLE_CONN_INT_MIN);
+
   if (!L2CA_UpdateBleConnParams(bd_addr, min_int, max_int, latency, timeout,
                                 min_ce_len, max_ce_len)) {
     APPL_TRACE_ERROR("Update connection parameters failed!");

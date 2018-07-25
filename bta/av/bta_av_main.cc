@@ -277,6 +277,27 @@ static tBTA_AV_SCB* bta_av_addr_to_scb(const RawAddress& bd_addr) {
   return p_scb;
 }
 
+int BTA_AvObtainPeerChannelIndex(const RawAddress& peer_address) {
+  // Find the entry for the peer (if exists)
+  tBTA_AV_SCB* p_scb = bta_av_addr_to_scb(peer_address);
+  if (p_scb != nullptr) {
+    return p_scb->hdi;
+  }
+
+  // Find the index for an entry that is not used
+  for (int index = 0; index < BTA_AV_NUM_STRS; index++) {
+    tBTA_AV_SCB* p_scb = bta_av_cb.p_scb[index];
+    if (p_scb == nullptr) {
+      continue;
+    }
+    if (p_scb->PeerAddress().IsEmpty()) {
+      return p_scb->hdi;
+    }
+  }
+
+  return -1;
+}
+
 /*******************************************************************************
  *
  * Function         bta_av_hndl_to_scb
@@ -818,6 +839,13 @@ bool bta_av_chk_start(tBTA_AV_SCB* p_scb) {
       }
     }
   }
+
+  LOG_INFO(LOG_TAG,
+           "%s: peer %s channel:%d bta_av_cb.audio_open_cnt:%d role:0x%x "
+           "features:0x%x start:%s",
+           __func__, p_scb->PeerAddress().ToString().c_str(), p_scb->chnl,
+           bta_av_cb.audio_open_cnt, p_scb->role, bta_av_cb.features,
+           logbool(start).c_str());
   return start;
 }
 
@@ -1057,10 +1085,11 @@ bool bta_av_link_role_ok(tBTA_AV_SCB* p_scb, uint8_t bits) {
   bool is_ok = true;
 
   if (BTM_GetRole(p_scb->PeerAddress(), &role) == BTM_SUCCESS) {
-    LOG_INFO(LOG_TAG,
-             "%s: hndl:x%x role:%d conn_audio:x%x bits:%d features:x%x",
-             __func__, p_scb->hndl, role, bta_av_cb.conn_audio, bits,
-             bta_av_cb.features);
+    LOG_INFO(
+        LOG_TAG,
+        "%s: peer %s hndl:0x%x role:%d conn_audio:0x%x bits:%d features:0x%x",
+        __func__, p_scb->PeerAddress().ToString().c_str(), p_scb->hndl, role,
+        bta_av_cb.conn_audio, bits, bta_av_cb.features);
     if (BTM_ROLE_MASTER != role &&
         (A2DP_BitsSet(bta_av_cb.conn_audio) > bits ||
          (bta_av_cb.features & BTA_AV_FEAT_MASTER))) {
@@ -1068,9 +1097,13 @@ bool bta_av_link_role_ok(tBTA_AV_SCB* p_scb, uint8_t bits) {
         bta_sys_clear_policy(BTA_ID_AV, HCI_ENABLE_MASTER_SLAVE_SWITCH,
                              p_scb->PeerAddress());
 
-      if (BTM_CMD_STARTED !=
-          BTM_SwitchRole(p_scb->PeerAddress(), BTM_ROLE_MASTER, NULL)) {
+      tBTM_STATUS status =
+          BTM_SwitchRole(p_scb->PeerAddress(), BTM_ROLE_MASTER, NULL);
+      if (status != BTM_CMD_STARTED) {
         /* can not switch role on SCB - start the timer on SCB */
+        LOG_ERROR(LOG_TAG,
+                  "%s: peer %s BTM_SwitchRole(BTM_ROLE_MASTER) error: %d",
+                  __func__, p_scb->PeerAddress().ToString().c_str(), status);
       }
       is_ok = false;
       p_scb->wait |= BTA_AV_WAIT_ROLE_SW_RES_START;
@@ -1349,6 +1382,8 @@ const char* bta_av_evt_code(uint16_t evt_code) {
 }
 
 void bta_debug_av_dump(int fd) {
+  if (appl_trace_level < BT_TRACE_LEVEL_DEBUG) return;
+
   dprintf(fd, "\nBTA AV State:\n");
   dprintf(fd, "  State Machine State: %s\n", bta_av_st_code(bta_av_cb.state));
   dprintf(fd, "  Link signalling timer: %s\n",
@@ -1377,6 +1412,9 @@ void bta_debug_av_dump(int fd) {
   for (size_t i = 0; i < sizeof(bta_av_cb.lcb) / sizeof(bta_av_cb.lcb[0]);
        i++) {
     const tBTA_AV_LCB& lcb = bta_av_cb.lcb[i];
+    if (lcb.addr.IsEmpty()) {
+      continue;
+    }
     dprintf(fd, "\n  Link control block: %zu peer: %s\n", i,
             lcb.addr.ToString().c_str());
     dprintf(fd, "    Connected stream handle mask: 0x%x\n", lcb.conn_msk);
@@ -1387,12 +1425,18 @@ void bta_debug_av_dump(int fd) {
     if (p_scb == nullptr) {
       continue;
     }
+    if (p_scb->PeerAddress().IsEmpty()) {
+      continue;
+    }
     dprintf(fd, "\n  BTA ID: %zu peer: %s\n", i,
             p_scb->PeerAddress().ToString().c_str());
     dprintf(fd, "    SDP discovery started: %s\n",
             p_scb->sdp_discovery_started ? "true" : "false");
     for (size_t j = 0; j < BTAV_A2DP_CODEC_INDEX_MAX; j++) {
       const tBTA_AV_SEP& sep = p_scb->seps[j];
+      if (sep.av_handle == 0) {
+        continue;
+      }
       dprintf(fd, "    SEP ID: %zu\n", j);
       dprintf(fd, "      SEP AVDTP handle: %d\n", sep.av_handle);
       dprintf(fd, "      Local SEP type: %d\n", sep.tsep);
@@ -1422,7 +1466,7 @@ void bta_debug_av_dump(int fd) {
     dprintf(fd, "    Congested: %s\n", p_scb->cong ? "true" : "false");
     dprintf(fd, "    Open status: %d\n", p_scb->open_status);
     dprintf(fd, "    Channel: %d\n", p_scb->chnl);
-    dprintf(fd, "    BTA handle: %d\n", p_scb->hndl);
+    dprintf(fd, "    BTA handle: 0x%x\n", p_scb->hndl);
     dprintf(fd, "    Protocol service capabilities mask: 0x%x\n",
             p_scb->cur_psc_mask);
     dprintf(fd, "    AVDTP handle: %d\n", p_scb->avdt_handle);

@@ -19,9 +19,9 @@
 #include <map>
 #include <memory>
 
-#include "avrcp.h"
-#include "connection_handler.h"
+#include "hardware/avrcp/avrcp.h"
 #include "osi/include/properties.h"
+#include "profile/avrcp/connection_handler.h"
 #include "raw_address.h"
 
 namespace bluetooth {
@@ -37,9 +37,6 @@ namespace avrcp {
  */
 class AvrcpService : public MediaCallbacks {
  public:
-  static void Init(MediaInterface* media_interface,
-                   VolumeInterface* volume_interface);
-
   /**
    * Gets a handle to the AvrcpService
    *
@@ -56,10 +53,11 @@ class AvrcpService : public MediaCallbacks {
    */
   static ServiceInterface* GetServiceInterface();
 
+  void Init(MediaInterface* media_interface, VolumeInterface* volume_interface);
   void Cleanup();
 
-  bool ConnectDevice(const RawAddress& bdaddr);
-  bool DisconnectDevice(const RawAddress& bdaddr);
+  void ConnectDevice(const RawAddress& bdaddr);
+  void DisconnectDevice(const RawAddress& bdaddr);
 
   // Functions inherited from MediaCallbacks in order to receive updates
   void SendMediaUpdate(bool track_changed, bool play_state,
@@ -75,6 +73,9 @@ class AvrcpService : public MediaCallbacks {
     bool ConnectDevice(const RawAddress& bdaddr) override;
     bool DisconnectDevice(const RawAddress& bdaddr) override;
     bool Cleanup() override;
+
+   private:
+    std::mutex service_interface_lock_;
   };
 
   static void DebugDump(int fd);
@@ -96,5 +97,5 @@ class AvrcpService : public MediaCallbacks {
 }  // namespace bluetooth
 
 inline bool is_new_avrcp_enabled() {
-  return osi_property_get_bool("persist.bluetooth.enablenewavrcp", false);
+  return osi_property_get_bool("persist.bluetooth.enablenewavrcp", true);
 }

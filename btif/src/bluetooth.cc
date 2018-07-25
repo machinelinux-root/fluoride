@@ -47,10 +47,10 @@
 #include <hardware/bt_sdp.h>
 #include <hardware/bt_sock.h>
 
-#include "avrcp_service.h"
 #include "bt_utils.h"
 #include "bta/include/bta_hearing_aid_api.h"
 #include "bta/include/bta_hf_client_api.h"
+#include "btif/avrcp/avrcp_service.h"
 #include "btif_a2dp.h"
 #include "btif_api.h"
 #include "btif_av.h"
@@ -326,8 +326,6 @@ static void dump(int fd, const char** arguments) {
 #if (BTSNOOP_MEM == TRUE)
   btif_debug_btsnoop_dump(fd);
 #endif
-
-  close(fd);
 }
 
 static void dumpMetrics(std::string* output) {
