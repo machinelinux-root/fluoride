@@ -40,7 +40,6 @@
 #include <time.h>
 
 #include "bt_common.h"
-#include "bta_closure_api.h"
 #include "bta_hd_api.h"
 #include "bta_hearing_aid_api.h"
 #include "bta_hh_api.h"
@@ -209,10 +208,12 @@ static int prop2cfg(const RawAddress* remote_bd_addr, bt_property_t* prop) {
                             : prop->len;
       strncpy(value, (char*)prop->val, name_length);
       value[name_length] = '\0';
-      if (remote_bd_addr)
+      if (remote_bd_addr) {
         btif_config_set_str(bdstr, BTIF_STORAGE_PATH_REMOTE_NAME, value);
-      else
+      } else {
         btif_config_set_str("Adapter", BTIF_STORAGE_KEY_ADAPTER_NAME, value);
+        btif_config_flush();
+      }
       break;
     }
     case BT_PROPERTY_REMOTE_FRIENDLY_NAME:
