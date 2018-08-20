@@ -171,7 +171,7 @@ static future_t* hci_module_start_up(void) {
   command_credits = 1;
 
   // For now, always use the default timeout on non-Android builds.
-  period_ms_t startup_timeout_ms = DEFAULT_STARTUP_TIMEOUT_MS;
+  uint64_t startup_timeout_ms = DEFAULT_STARTUP_TIMEOUT_MS;
 
   // Grab the override startup timeout ms, if present.
   char timeout_prop[PROPERTY_VALUE_MAX];
@@ -342,6 +342,9 @@ static void event_finish_startup(UNUSED_ATTR void* context) {
   std::lock_guard<std::recursive_timed_mutex> lock(
       commands_pending_response_mutex);
   alarm_cancel(startup_timer);
+  if (!startup_future) {
+    return;
+  }
   future_ready(startup_future, FUTURE_SUCCESS);
   startup_future = NULL;
 }
@@ -358,9 +361,11 @@ static void startup_timer_expired(UNUSED_ATTR void* context) {
     // hence abort.
     abort();
   }
+  if (!startup_future) {
+    return;
+  }
   future_ready(startup_future, FUTURE_FAIL);
   startup_future = NULL;
-  lock.unlock();
 }
 
 // Command/packet transmitting functions
