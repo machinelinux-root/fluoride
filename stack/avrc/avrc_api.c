@@ -24,6 +24,8 @@
 #include <assert.h>
 #include <string.h>
 
+#include <log/log.h>
+
 #include "bt_common.h"
 #include "avrc_api.h"
 #include "avrc_int.h"
@@ -316,15 +318,15 @@ static BT_HDR * avrc_proc_vendor_command(UINT8 handle, UINT8 label,
 
     if (status != AVRC_STS_NO_ERROR)
     {
-        /* use the current GKI buffer to build/send the reject message */
-        p_data = (UINT8 *)(p_pkt+1) + p_pkt->offset;
+        p_rsp = (BT_HDR*)osi_malloc(BT_DEFAULT_BUFFER_SIZE);
+        p_rsp->offset = p_pkt->offset;
+        p_data = (uint8_t*)(p_rsp + 1) + p_pkt->offset;
         *p_data++ = AVRC_RSP_REJ;
         p_data += AVRC_VENDOR_HDR_SIZE; /* pdu */
         *p_data++ = 0;                  /* pkt_type */
         UINT16_TO_BE_STREAM(p_data, 1); /* len */
         *p_data++ = status;             /* error code */
-        p_pkt->len = AVRC_VENDOR_HDR_SIZE + 5;
-        p_rsp = p_pkt;
+        p_rsp->len = AVRC_VENDOR_HDR_SIZE + 5;
     }
 
     return p_rsp;
@@ -472,6 +474,7 @@ static UINT8 avrc_proc_far_msg(UINT8 handle, UINT8 label, UINT8 cr, BT_HDR **pp_
             if (p_rsp)
             {
                 AVCT_MsgReq( handle, label, AVCT_RSP, p_rsp);
+                osi_free_and_reset((void **)pp_pkt);
                 drop_code = 3;
             }
             else if (p_msg->hdr.opcode == AVRC_OP_DROP)
@@ -564,6 +567,13 @@ static void avrc_msg_cback(UINT8 handle, UINT8 label, UINT8 cr,
     p_data  = (UINT8 *)(p_pkt+1) + p_pkt->offset;
     memset(&msg, 0, sizeof(tAVRC_MSG) );
     {
+        if (p_pkt->len < AVRC_AVC_HDR_SIZE) {
+            android_errorWriteLog(0x534e4554, "111803925");
+            AVRC_TRACE_WARNING("%s: message length %d too short: must be at least %d",
+                               __func__, p_pkt->len, AVRC_AVC_HDR_SIZE);
+            osi_free(p_pkt);
+            return;
+        }
         msg.hdr.ctype           = p_data[0] & AVRC_CTYPE_MASK;
         AVRC_TRACE_DEBUG("avrc_msg_cback handle:%d, ctype:%d, offset:%d, len: %d",
                 handle, msg.hdr.ctype, p_pkt->offset, p_pkt->len);
@@ -602,6 +612,15 @@ static void avrc_msg_cback(UINT8 handle, UINT8 label, UINT8 cr,
             else
             {
                 /* parse response */
+                if (p_pkt->len < AVRC_OP_UNIT_INFO_RSP_LEN) {
+                    AVRC_TRACE_WARNING(
+                        "%s: message length %d too short: must be at least %d",
+                        __func__, p_pkt->len, AVRC_OP_UNIT_INFO_RSP_LEN);
+                    android_errorWriteLog(0x534e4554, "79883824");
+                    drop = TRUE;
+                    p_drop_msg = "UNIT_INFO_RSP too short";
+                    break;
+                }
                 p_data += 4; /* 3 bytes: ctype, subunit*, opcode + octet 3 (is 7)*/
                 msg.unit.unit_type  = (*p_data & AVRC_SUBTYPE_MASK) >> AVRC_SUBTYPE_SHIFT;
                 msg.unit.unit       = *p_data & AVRC_SUBID_MASK;
@@ -633,6 +652,15 @@ static void avrc_msg_cback(UINT8 handle, UINT8 label, UINT8 cr,
             else
             {
                 /* parse response */
+                if (p_pkt->len < AVRC_OP_SUB_UNIT_INFO_RSP_LEN) {
+                    AVRC_TRACE_WARNING(
+                        "%s: message length %d too short: must be at least %d",
+                        __func__, p_pkt->len, AVRC_OP_SUB_UNIT_INFO_RSP_LEN);
+                    android_errorWriteLog(0x534e4554, "79883824");
+                    drop = TRUE;
+                    p_drop_msg = "SUB_UNIT_INFO_RSP too short";
+                    break;
+                }
                 p_data += AVRC_AVC_HDR_SIZE; /* 3 bytes: ctype, subunit*, opcode */
                 msg.sub.page    = (*p_data++ >> AVRC_SUB_PAGE_SHIFT) & AVRC_SUB_PAGE_MASK;
                 xx      = 0;
