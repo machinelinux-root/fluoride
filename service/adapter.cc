@@ -25,7 +25,9 @@
 #include <base/observer_list.h>
 
 #include "service/a2dp_sink.h"
+#include "service/a2dp_source.h"
 #include "service/avrcp_control.h"
+#include "service/avrcp_target.h"
 #include "service/common/bluetooth/util/atomic_string.h"
 #include "service/gatt_client.h"
 #include "service/gatt_server.h"
@@ -35,7 +37,6 @@
 #include "service/low_energy_client.h"
 #include "service/low_energy_scanner.h"
 
-using android::String16;
 using std::lock_guard;
 using std::mutex;
 
@@ -45,8 +46,8 @@ namespace {
 
 RemoteDeviceProps ParseRemoteDeviceProps(int num_properties,
                                          bt_property_t* properties) {
-  android::String16 name;
-  android::String16 address;
+  std::string name;
+  std::string address;
   std::vector<Uuid> service_uuids;
   int32_t device_class = 0;
   int32_t device_type = 0;
@@ -61,7 +62,7 @@ RemoteDeviceProps ParseRemoteDeviceProps(int num_properties,
           break;
         }
         bt_bdname_t* hal_name = reinterpret_cast<bt_bdname_t*>(property->val);
-        name = String16(reinterpret_cast<char*>(hal_name->name));
+        name = reinterpret_cast<char*>(hal_name->name);
         break;
       }
       case BT_PROPERTY_BDADDR: {
@@ -69,9 +70,7 @@ RemoteDeviceProps ParseRemoteDeviceProps(int num_properties,
           NOTREACHED() << "Invalid length for BT_PROPERTY_BDADDR";
           break;
         }
-        std::string remote_bdaddr_str =
-            BtAddrString(reinterpret_cast<RawAddress*>(property->val));
-        address = String16(remote_bdaddr_str.c_str(), remote_bdaddr_str.size());
+        address = BtAddrString(reinterpret_cast<RawAddress*>(property->val));
         break;
       }
       case BT_PROPERTY_UUIDS: {
@@ -79,13 +78,13 @@ RemoteDeviceProps ParseRemoteDeviceProps(int num_properties,
           NOTREACHED() << "Negative length on BT_PROPERTY_UUIDS:";
           break;
         }
-        if (property->len % sizeof(Uuid::UUID128Bit) != 0) {
+        if (property->len % sizeof(Uuid) != 0) {
           NOTREACHED() << "Trailing bytes on BT_PROPERTY_UUIDS:";
         }
-        auto uuids = static_cast<const Uuid::UUID128Bit*>(property->val);
+        auto uuids = static_cast<const Uuid*>(property->val);
 
-        for (size_t i = 0; i < property->len / sizeof(Uuid::UUID128Bit); ++i) {
-          service_uuids.push_back(Uuid::From128BitLE(uuids[i]));
+        for (size_t i = 0; i < property->len / sizeof(Uuid); ++i) {
+          service_uuids.push_back(uuids[i]);
         }
         break;
       }
@@ -202,7 +201,9 @@ class AdapterImpl : public Adapter, public hal::BluetoothInterface::Observer {
     memset(&local_le_features_, 0, sizeof(local_le_features_));
     hal::BluetoothInterface::Get()->AddObserver(this);
     a2dp_sink_factory_.reset(new A2dpSinkFactory);
+    a2dp_source_factory_.reset(new A2dpSourceFactory);
     avrcp_control_factory_.reset(new AvrcpControlFactory);
+    avrcp_target_factory_.reset(new AvrcpTargetFactory);
     ble_client_factory_.reset(new LowEnergyClientFactory(*this));
     ble_advertiser_factory_.reset(new LowEnergyAdvertiserFactory());
     ble_scanner_factory_.reset(new LowEnergyScannerFactory(*this));
@@ -466,8 +467,16 @@ class AdapterImpl : public Adapter, public hal::BluetoothInterface::Observer {
     return a2dp_sink_factory_.get();
   }
 
+  A2dpSourceFactory* GetA2dpSourceFactory() const override {
+    return a2dp_source_factory_.get();
+  }
+
   AvrcpControlFactory* GetAvrcpControlFactory() const override {
     return avrcp_control_factory_.get();
+  }
+
+  AvrcpTargetFactory* GetAvrcpTargetFactory() const override {
+    return avrcp_target_factory_.get();
   }
 
   LowEnergyClientFactory* GetLowEnergyClientFactory() const override {
@@ -611,9 +620,7 @@ class AdapterImpl : public Adapter, public hal::BluetoothInterface::Observer {
     RemoteDeviceProps props =
         ParseRemoteDeviceProps(num_properties, properties);
 
-    std::string remote_bdaddr_str = BtAddrString(remote_bdaddr);
-    android::String16 address =
-        String16(remote_bdaddr_str.c_str(), remote_bdaddr_str.size());
+    std::string address = BtAddrString(remote_bdaddr);
     props.set_address(address);
 
     lock_guard<mutex> lock(observers_lock_);
@@ -764,8 +771,14 @@ class AdapterImpl : public Adapter, public hal::BluetoothInterface::Observer {
   // Factory used to create per-app A2dpSink instances.
   std::unique_ptr<A2dpSinkFactory> a2dp_sink_factory_;
 
+  // Factory used to create per-app A2dpSource instances.
+  std::unique_ptr<A2dpSourceFactory> a2dp_source_factory_;
+
   // Factory used to create per-app AvrcpControl instances.
   std::unique_ptr<AvrcpControlFactory> avrcp_control_factory_;
+
+  // Factory used to create per-app AvrcpTarget instances.
+  std::unique_ptr<AvrcpTargetFactory> avrcp_target_factory_;
 
   // Factory used to create per-app LowEnergyClient instances.
   std::unique_ptr<LowEnergyClientFactory> ble_client_factory_;

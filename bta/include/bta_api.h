@@ -50,11 +50,9 @@ typedef uint8_t tBTA_STATUS;
  * Service ID
  *
  * NOTES: When you add a new Service ID for BTA AND require to change the value
- * of BTA_MAX_SERVICE_ID,
- *        make sure that the correct security ID of the new service from
- * Security service definitions (btm_api.h)
- *        should be added to bta_service_id_to_btm_srv_id_lkup_tbl table in
- * bta_dm_act.c.
+ * of BTA_MAX_SERVICE_ID, make sure that the correct security ID of the new
+ * service from Security service definitions (btm_api.h) should be added to
+ * bta_service_id_to_btm_srv_id_lkup_tbl table in bta_dm_act.cc
  */
 
 #define BTA_RES_SERVICE_ID 0         /* Reserved */
@@ -1383,11 +1381,6 @@ extern void BTA_DmCloseACL(const RawAddress& bd_addr, bool remove_dev,
  ******************************************************************************/
 extern void BTA_DmBleSecurityGrant(const RawAddress& bd_addr,
                                    tBTA_DM_BLE_SEC_GRANT res);
-
-/**
- * Set BLE connectable mode to auto connect
- */
-extern void BTA_DmBleStartAutoConn();
 
 /*******************************************************************************
  *

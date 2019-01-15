@@ -134,9 +134,9 @@ static void bta_ag_sco_conn_cback(uint16_t sco_idx) {
   }
 
   if (handle != 0) {
-    do_in_bta_thread(FROM_HERE,
-                     base::Bind(&bta_ag_sm_execute_by_handle, handle,
-                                BTA_AG_SCO_OPEN_EVT, tBTA_AG_DATA::kEmpty));
+    do_in_main_thread(FROM_HERE,
+                      base::Bind(&bta_ag_sm_execute_by_handle, handle,
+                                 BTA_AG_SCO_OPEN_EVT, tBTA_AG_DATA::kEmpty));
   } else {
     /* no match found; disconnect sco, init sco variables */
     bta_ag_cb.sco.p_curr_scb = nullptr;
@@ -217,9 +217,9 @@ static void bta_ag_sco_disc_cback(uint16_t sco_idx) {
 
     bta_ag_cb.sco.p_curr_scb->inuse_codec = BTA_AG_CODEC_NONE;
 
-    do_in_bta_thread(FROM_HERE,
-                     base::Bind(&bta_ag_sm_execute_by_handle, handle,
-                                BTA_AG_SCO_CLOSE_EVT, tBTA_AG_DATA::kEmpty));
+    do_in_main_thread(FROM_HERE,
+                      base::Bind(&bta_ag_sm_execute_by_handle, handle,
+                                 BTA_AG_SCO_CLOSE_EVT, tBTA_AG_DATA::kEmpty));
   } else {
     /* no match found */
     APPL_TRACE_DEBUG("no scb for ag_sco_disc_cback");
@@ -373,7 +373,7 @@ static void bta_ag_create_sco(tBTA_AG_SCB* p_scb, bool is_orig) {
                  << " is not active, active_device=" << active_device_addr;
     if (bta_ag_cb.sco.p_curr_scb != nullptr &&
         bta_ag_cb.sco.p_curr_scb->in_use && p_scb == bta_ag_cb.sco.p_curr_scb) {
-      do_in_bta_thread(
+      do_in_main_thread(
           FROM_HERE, base::Bind(&bta_ag_sm_execute, p_scb, BTA_AG_SCO_CLOSE_EVT,
                                 tBTA_AG_DATA::kEmpty));
     }
@@ -561,12 +561,20 @@ static void bta_ag_codec_negotiation_timer_cback(void* data) {
 void bta_ag_codec_negotiate(tBTA_AG_SCB* p_scb) {
   APPL_TRACE_DEBUG("%s", __func__);
   bta_ag_cb.sco.p_curr_scb = p_scb;
+  uint8_t* p_rem_feat = BTM_ReadRemoteFeatures(p_scb->peer_addr);
+  bool sdp_wbs_support = p_scb->peer_sdp_features & BTA_AG_FEAT_WBS_SUPPORT;
 
-  // Workaround for misbehaving HFs such as Sony XAV AX100 car kit and Sony
-  // MW600 Headset, which indicate WBS support in SDP, but no codec
-  // negotiation support in BRSF. In this case, using mSBC codec can result
-  // background noise or no audio. Thus, defaulting to CVSD instead.
-  if (!(p_scb->peer_features & BTA_AG_PEER_FEAT_CODEC)) {
+  // Workaround for misbehaving HFs, which indicate which one is not support on
+  // Transparent Synchronous Data in Remote Supported Features, WBS in SDP and
+  // and Codec Negotiation in BRSF. Fluoride will assume CVSD codec by default.
+  // In Sony XAV AX100 car kit and Sony MW600 Headset case, which indicate
+  // Transparent Synchronous Data and WBS support, but no codec negotiation
+  // support, using mSBC codec can result background noise or no audio.
+  // In Skullcandy JIB case, which indicate WBS and codec negotiation support,
+  // but no Transparent Synchronous Data support, using mSBC codec can result
+  // SCO setup fail by Firmware rejest.
+  if (!HCI_LMP_TRANSPNT_SUPPORTED(p_rem_feat) || !sdp_wbs_support ||
+      !(p_scb->peer_features & BTA_AG_PEER_FEAT_CODEC)) {
     p_scb->sco_codec = UUID_CODEC_CVSD;
   }
 

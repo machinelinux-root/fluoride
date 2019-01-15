@@ -28,10 +28,10 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "common/time_util.h"
 #include "device/include/controller.h"
 #include "osi/include/log.h"
 #include "osi/include/osi.h"
-#include "osi/include/time.h"
 
 #include "bt_types.h"
 #include "bt_utils.h"
@@ -2688,7 +2688,6 @@ void btm_sec_check_pending_reqs(void) {
 void btm_sec_init(uint8_t sec_mode) {
   btm_cb.security_mode = sec_mode;
   btm_cb.pairing_bda = RawAddress::kAny;
-  btm_cb.max_collision_delay = BTM_SEC_MAX_COLLISION_DELAY;
 }
 
 /*******************************************************************************
@@ -2790,7 +2789,7 @@ static tBTM_STATUS btm_sec_dd_create_conn(tBTM_SEC_DEV_REC* p_dev_rec) {
   /* set up the control block to indicated dedicated bonding */
   btm_cb.pairing_flags |= BTM_PAIR_FLAGS_DISC_WHEN_DONE;
 
-  if (!l2cu_create_conn(p_lcb, BT_TRANSPORT_BR_EDR)) {
+  if (!l2cu_create_conn_br_edr(p_lcb)) {
     LOG(WARNING) << "Security Manager: failed create allocate LCB "
                  << p_dev_rec->bd_addr;
 
@@ -3677,10 +3676,10 @@ static void btm_sec_auth_collision(uint16_t handle) {
   tBTM_SEC_DEV_REC* p_dev_rec;
 
   if (!btm_cb.collision_start_time)
-    btm_cb.collision_start_time = time_get_os_boottime_ms();
+    btm_cb.collision_start_time = bluetooth::common::time_get_os_boottime_ms();
 
-  if ((time_get_os_boottime_ms() - btm_cb.collision_start_time) <
-      btm_cb.max_collision_delay) {
+  if ((bluetooth::common::time_get_os_boottime_ms() -
+       btm_cb.collision_start_time) < BTM_SEC_MAX_COLLISION_DELAY) {
     if (handle == BTM_SEC_INVALID_HANDLE) {
       p_dev_rec = btm_sec_find_dev_by_sec_state(BTM_SEC_STATE_AUTHENTICATING);
       if (p_dev_rec == NULL)

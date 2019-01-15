@@ -35,6 +35,7 @@
 #include "bta_av_api.h"
 #include "bta_av_int.h"
 #include "l2c_api.h"
+#include "log/log.h"
 #include "osi/include/list.h"
 #include "osi/include/log.h"
 #include "osi/include/osi.h"
@@ -313,18 +314,26 @@ uint8_t bta_av_rc_create(tBTA_AV_CB* p_cb, uint8_t role, uint8_t shdl,
   tAVRC_CONN_CB ccb;
   RawAddress bda = RawAddress::kAny;
   uint8_t status = BTA_AV_RC_ROLE_ACP;
-  tBTA_AV_SCB* p_scb = p_cb->p_scb[shdl - 1];
   int i;
   uint8_t rc_handle;
   tBTA_AV_RCB* p_rcb;
 
   if (role == AVCT_INT) {
+    // Can't grab a stream control block that doesn't have a valid handle
+    if (!shdl) {
+      APPL_TRACE_ERROR(
+          "%s: Can't grab stream control block for shdl = %d -> index = %d",
+          __func__, shdl, shdl - 1);
+      return BTA_AV_RC_HANDLE_NONE;
+    }
+    tBTA_AV_SCB* p_scb = p_cb->p_scb[shdl - 1];
     bda = p_scb->PeerAddress();
     status = BTA_AV_RC_ROLE_INT;
   } else {
     p_rcb = bta_av_get_rcb_by_shdl(shdl);
     if (p_rcb != NULL) {
       APPL_TRACE_ERROR("%s: ACP handle exist for shdl:%d", __func__, shdl);
+      p_rcb->lidx = lidx;
       return p_rcb->handle;
     }
   }
@@ -784,11 +793,16 @@ tBTA_AV_EVT bta_av_proc_meta_cmd(tAVRC_RESPONSE* p_rc_rsp,
       case AVRC_PDU_GET_CAPABILITIES:
         /* process GetCapabilities command without reporting the event to app */
         evt = 0;
+        if (p_vendor->vendor_len != 5) {
+          android_errorWriteLog(0x534e4554, "111893951");
+          p_rc_rsp->get_caps.status = AVRC_STS_INTERNAL_ERR;
+          break;
+        }
         u8 = *(p_vendor->p_vendor_data + 4);
         p = p_vendor->p_vendor_data + 2;
         p_rc_rsp->get_caps.capability_id = u8;
         BE_STREAM_TO_UINT16(u16, p);
-        if ((u16 != 1) || (p_vendor->vendor_len != 5)) {
+        if (u16 != 1) {
           p_rc_rsp->get_caps.status = AVRC_STS_INTERNAL_ERR;
         } else {
           p_rc_rsp->get_caps.status = AVRC_STS_NO_ERROR;

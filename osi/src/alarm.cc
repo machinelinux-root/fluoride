@@ -46,12 +46,11 @@
 #include "osi/include/semaphore.h"
 #include "osi/include/thread.h"
 #include "osi/include/wakelock.h"
+#include "stack/include/btu.h"
 
 using base::Bind;
 using base::CancelableClosure;
 using base::MessageLoop;
-
-extern base::MessageLoop* get_message_loop();
 
 // Callback and timer threads should run at RT priority in order to ensure they
 // meet audio deadlines.  Use this priority for all audio/timer related thread.
@@ -562,11 +561,16 @@ static void alarm_ready_generic(alarm_t* alarm,
   if (alarm == NULL) {
     return;  // The alarm was probably canceled
   }
+
   //
   // If the alarm is not periodic, we've fully serviced it now, and can reset
   // some of its internal state. This is useful to distinguish between expired
   // alarms and active ones.
   //
+  if (!alarm->callback) {
+    LOG(FATAL) << __func__
+               << ": timer callback is NULL! Name=" << alarm->stats.name;
+  }
   alarm_callback_t callback = alarm->callback;
   void* data = alarm->data;
   uint64_t deadline_ms = alarm->deadline_ms;
@@ -643,15 +647,15 @@ static void callback_dispatch(UNUSED_ATTR void* context) {
 
     // Enqueue the alarm for processing
     if (alarm->for_msg_loop) {
-      if (!get_message_loop()) {
+      if (!get_main_message_loop()) {
         LOG_ERROR(LOG_TAG, "%s: message loop already NULL. Alarm: %s", __func__,
                   alarm->stats.name);
         continue;
       }
 
       alarm->closure.i.Reset(Bind(alarm_ready_mloop, alarm));
-      get_message_loop()->task_runner()->PostTask(FROM_HERE,
-                                                  alarm->closure.i.callback());
+      get_main_message_loop()->task_runner()->PostTask(
+          FROM_HERE, alarm->closure.i.callback());
     } else {
       fixed_queue_enqueue(alarm->queue, alarm);
     }

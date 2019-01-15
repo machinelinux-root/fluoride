@@ -197,8 +197,7 @@ typedef uint8_t tBTM_BLE_RL_STATE;
 
 /* BLE connection state */
 #define BLE_CONN_IDLE 0
-#define BLE_DIR_CONN 1
-#define BLE_BG_CONN 2
+#define BLE_CONNECTING 2
 #define BLE_CONN_CANCEL 3
 typedef uint8_t tBTM_BLE_CONN_ST;
 
@@ -286,14 +285,12 @@ typedef struct {
   alarm_t* observer_timer;
 
   /* background connection procedure cb value */
-  tBTM_BLE_CONN_TYPE bg_conn_type;
   uint16_t scan_int;
   uint16_t scan_win;
 
   /* white list information */
   uint8_t wl_state;
 
-  fixed_queue_t* conn_pending_q;
   tBTM_BLE_CONN_ST conn_state;
 
   /* random address management control block */

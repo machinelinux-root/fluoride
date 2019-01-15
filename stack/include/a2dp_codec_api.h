@@ -34,7 +34,6 @@
 #include "a2dp_api.h"
 #include "audio_a2dp_hw/include/audio_a2dp_hw.h"
 #include "avdt_api.h"
-#include "osi/include/time.h"
 
 class tBT_A2DP_OFFLOAD;
 
@@ -301,6 +300,10 @@ class A2dpCodecs {
   // |p_codec_info| information.
   // Returns the Sink codec if found, otherwise nullptr.
   A2dpCodecConfig* findSinkCodecConfig(const uint8_t* p_codec_info);
+
+  // Checks whether the codec for |codec_index| is supported.
+  // Returns true if the codec is supported, otherwise false.
+  bool isSupportedCodec(btav_a2dp_codec_index_t codec_index);
 
   // Gets the codec config that is currently selected.
   // Returns the codec config that is currently selected, or nullptr if
@@ -638,6 +641,12 @@ bool A2DP_CodecEquals(const uint8_t* p_codec_info_a,
 // Returns the track sample rate on success, or -1 if |p_codec_info|
 // contains invalid codec information.
 int A2DP_GetTrackSampleRate(const uint8_t* p_codec_info);
+
+// Gets the track bits per sample value for the A2DP codec.
+// |p_codec_info| is a pointer to the codec_info to decode.
+// Returns the track bits per sample on success, or -1 if |p_codec_info|
+// contains invalid codec information.
+int A2DP_GetTrackBitsPerSample(const uint8_t* p_codec_info);
 
 // Gets the channel count for the A2DP codec.
 // |p_codec_info| is a pointer to the codec_info to decode.

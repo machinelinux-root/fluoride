@@ -203,13 +203,6 @@ typedef uint8_t tBTM_BLE_SFP;
 #define BTM_BLE_CONN_INT_MIN_HEARINGAID 0x0010
 #endif
 
-#define BTM_BLE_DIR_CONN_FALLBACK_UNDIR 1
-#define BTM_BLE_DIR_CONN_FALLBACK_NO_ADV 2
-
-#ifndef BTM_BLE_DIR_CONN_FALLBACK
-#define BTM_BLE_DIR_CONN_FALLBACK BTM_BLE_DIR_CONN_FALLBACK_UNDIR
-#endif
-
 #define BTM_CMAC_TLEN_SIZE 8 /* 64 bits */
 #define BTM_BLE_AUTH_SIGN_LEN \
   12 /* BLE data signature length 8 Bytes + 4 bytes counter*/
@@ -494,9 +487,6 @@ typedef uint8_t BTM_BLE_ADV_STATE;
 typedef uint8_t BTM_BLE_ADV_INFO_PRESENT;
 typedef uint8_t BTM_BLE_RSSI_VALUE;
 typedef uint16_t BTM_BLE_ADV_INFO_TIMESTAMP;
-
-enum { BTM_BLE_CONN_NONE, BTM_BLE_CONN_AUTO };
-typedef uint8_t tBTM_BLE_CONN_TYPE;
 
 #define ADV_INFO_PRESENT 0x00
 #define NO_ADV_INFO_PRESENT 0x01

@@ -77,22 +77,6 @@ extern bool BTM_SecAddBleKey(const RawAddress& bd_addr,
 
 /*******************************************************************************
  *
- * Function         BTM_BleSetAdvParams
- *
- * Description      This function is called to set advertising parameters.
- *
- * Parameters:       None.
- *
- * Returns          void
- *
- ******************************************************************************/
-extern tBTM_STATUS BTM_BleSetAdvParams(uint16_t adv_int_min,
-                                       uint16_t adv_int_max,
-                                       tBLE_BD_ADDR* p_dir_bda,
-                                       tBTM_BLE_ADV_CHNL_MAP chnl_map);
-
-/*******************************************************************************
- *
  * Function         BTM_BleObtainVendorCapabilities
  *
  * Description      This function is called to obatin vendor capabilties
@@ -364,44 +348,7 @@ extern bool BTM_ReadRemoteConnectionAddr(const RawAddress& pseudo_addr,
  ******************************************************************************/
 extern void BTM_BleLoadLocalKeys(uint8_t key_type, tBTM_BLE_LOCAL_KEYS* p_key);
 
-/**
- * Set BLE connectable mode to auto connect
- */
-extern void BTM_BleStartAutoConn();
-
-/*******************************************************************************
- *
- * Function         BTM_BleUpdateBgConnDev
- *
- * Description      This function is called to add or remove a device into/from
- *                  background connection procedure. The background connection
-*                   procedure is decided by the background connection type, it
-*can be
-*                   auto connection, or selective connection.
- *
- * Parameters       add_remove: true to add; false to remove.
- *                  remote_bda: device address to add/remove.
- *
- * Returns          void
- *
- ******************************************************************************/
-extern bool BTM_BleUpdateBgConnDev(bool add_remove,
-                                   const RawAddress& remote_bda);
-
-/*******************************************************************************
- *
- * Function         BTM_BleClearBgConnDev
- *
- * Description      This function is called to clear the whitelist,
- *                  end any pending whitelist connections,
- *                  and reset the local bg device list.
- *
- * Parameters       void
- *
- * Returns          void
- *
- ******************************************************************************/
-extern void BTM_BleClearBgConnDev(void);
+#include "stack/btm/btm_ble_bgconn.h"
 
 /********************************************************
  *

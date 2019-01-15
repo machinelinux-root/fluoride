@@ -28,7 +28,9 @@
 // TODO (apanicke): Remove dependency on this header once we cleanup feature
 // handling.
 #include "bta/include/bta_av_api.h"
+#include "device/include/interop.h"
 #include "osi/include/allocator.h"
+#include "osi/include/properties.h"
 
 namespace bluetooth {
 namespace avrcp {
@@ -39,6 +41,20 @@ ConnectionHandler* ConnectionHandler::Get() {
   CHECK(instance_);
 
   return instance_;
+}
+
+bool IsAbsoluteVolumeEnabled(const RawAddress* bdaddr) {
+  char volume_disabled[PROPERTY_VALUE_MAX] = {0};
+  osi_property_get("persist.bluetooth.disableabsvol", volume_disabled, "false");
+  if (strncmp(volume_disabled, "true", 4) == 0) {
+    LOG(INFO) << "Absolute volume disabled by property";
+    return false;
+  }
+  if (interop_match_addr(INTEROP_DISABLE_ABSOLUTE_VOLUME, bdaddr)) {
+    LOG(INFO) << "Absolute volume disabled by IOP table";
+    return false;
+  }
+  return true;
 }
 
 bool ConnectionHandler::Initialize(const ConnectionCallback& callback,
@@ -135,7 +151,7 @@ bool ConnectionHandler::DisconnectDevice(const RawAddress& bdaddr) {
 std::vector<std::shared_ptr<Device>> ConnectionHandler::GetListOfDevices()
     const {
   std::vector<std::shared_ptr<Device>> list;
-  for (auto device : device_map_) {
+  for (const auto& device : device_map_) {
     list.push_back(device.second);
   }
   return list;
@@ -257,13 +273,20 @@ void ConnectionHandler::InitiatorControlCb(uint8_t handle, uint8_t event,
       device_map_.erase(handle);
     } break;
 
-    case AVRC_BROWSE_OPEN_IND_EVT:
+    case AVRC_BROWSE_OPEN_IND_EVT: {
       LOG(INFO) << __PRETTY_FUNCTION__ << ": Browse Open Event";
       // NOTE (apanicke): We don't need to explicitly handle this message
       // since the AVCTP Layer will still send us browsing messages
       // regardless. It would be useful to note this though for future
       // compatibility issues.
-      break;
+      if (device_map_.find(handle) == device_map_.end()) {
+        LOG(WARNING) << "Browse Opened received from device that doesn't exist";
+        return;
+      }
+
+      auto browse_mtu = avrc_->GetBrowseMtu(handle) - AVCT_HDR_LEN;
+      device_map_[handle]->SetBrowseMtu(browse_mtu);
+    } break;
     case AVRC_BROWSE_CLOSE_IND_EVT:
       LOG(INFO) << __PRETTY_FUNCTION__ << ": Browse Close Event";
       break;
@@ -341,13 +364,20 @@ void ConnectionHandler::AcceptorControlCb(uint8_t handle, uint8_t event,
       device_map_.erase(handle);
     } break;
 
-    case AVRC_BROWSE_OPEN_IND_EVT:
+    case AVRC_BROWSE_OPEN_IND_EVT: {
       LOG(INFO) << __PRETTY_FUNCTION__ << ": Browse Open Event";
       // NOTE (apanicke): We don't need to explicitly handle this message
       // since the AVCTP Layer will still send us browsing messages
       // regardless. It would be useful to note this though for future
       // compatibility issues.
-      break;
+      if (device_map_.find(handle) == device_map_.end()) {
+        LOG(WARNING) << "Browse Opened received from device that doesn't exist";
+        return;
+      }
+
+      auto browse_mtu = avrc_->GetBrowseMtu(handle) - AVCT_HDR_LEN;
+      device_map_[handle]->SetBrowseMtu(browse_mtu);
+    } break;
     case AVRC_BROWSE_CLOSE_IND_EVT:
       LOG(INFO) << __PRETTY_FUNCTION__ << ": Browse Close Event";
       break;
@@ -429,7 +459,9 @@ void ConnectionHandler::SdpCb(const RawAddress& bdaddr, SdpCallback cb,
           if (categories & AVRC_SUPF_CT_CAT2) {
             LOG(INFO) << __PRETTY_FUNCTION__ << ": Device " << bdaddr.ToString()
                       << " supports advanced control";
-            peer_features |= (BTA_AV_FEAT_ADV_CTRL);
+            if (IsAbsoluteVolumeEnabled(&bdaddr)) {
+              peer_features |= (BTA_AV_FEAT_ADV_CTRL);
+            }
           }
           if (categories & AVRC_SUPF_CT_BROWSE) {
             LOG(INFO) << __PRETTY_FUNCTION__ << ": Device " << bdaddr.ToString()
@@ -468,7 +500,9 @@ void ConnectionHandler::SdpCb(const RawAddress& bdaddr, SdpCallback cb,
           if (categories & AVRC_SUPF_CT_CAT2) {
             LOG(INFO) << __PRETTY_FUNCTION__ << ": Device " << bdaddr.ToString()
                       << " supports advanced control";
-            peer_features |= (BTA_AV_FEAT_ADV_CTRL);
+            if (IsAbsoluteVolumeEnabled(&bdaddr)) {
+              peer_features |= (BTA_AV_FEAT_ADV_CTRL);
+            }
           }
         }
       }

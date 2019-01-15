@@ -16,6 +16,7 @@
  *
  ******************************************************************************/
 
+#include <log/log.h>
 #include <string.h>
 #include "btif_common.h"
 #include "btif_storage.h"
@@ -422,7 +423,7 @@ void smp_send_ltk_reply(tSMP_CB* p_cb, tSMP_INT_DATA* p_data) {
  * Description  process security request.
  ******************************************************************************/
 void smp_proc_sec_req(tSMP_CB* p_cb, tSMP_INT_DATA* p_data) {
-  tBTM_LE_AUTH_REQ auth_req = *(tBTM_LE_AUTH_REQ*)p_data;
+  tBTM_LE_AUTH_REQ auth_req = *(tBTM_LE_AUTH_REQ*)p_data->p_data;
   tBTM_BLE_SEC_REQ_ACT sec_req_act;
 
   SMP_TRACE_DEBUG("%s: auth_req=0x%x", __func__, auth_req);
@@ -588,8 +589,6 @@ void smp_proc_pair_cmd(tSMP_CB* p_cb, tSMP_INT_DATA* p_data) {
 
 /** process pairing confirm from peer device */
 void smp_proc_confirm(tSMP_CB* p_cb, tSMP_INT_DATA* p_data) {
-  uint8_t* p = p_data->p_data;
-
   SMP_TRACE_DEBUG("%s", __func__);
 
   if (smp_command_has_invalid_parameters(p_cb)) {
@@ -599,9 +598,12 @@ void smp_proc_confirm(tSMP_CB* p_cb, tSMP_INT_DATA* p_data) {
     return;
   }
 
-  if (p != NULL) {
-    /* save the SConfirm for comparison later */
-    STREAM_TO_ARRAY(p_cb->rconfirm.data(), p, OCTET16_LEN);
+  if (p_data) {
+    uint8_t* p = p_data->p_data;
+    if (p != NULL) {
+      /* save the SConfirm for comparison later */
+      STREAM_TO_ARRAY(p_cb->rconfirm.data(), p, OCTET16_LEN);
+    }
   }
 
   p_cb->flags |= SMP_PAIR_FLAGS_CMD_CONFIRM;
@@ -954,14 +956,14 @@ void smp_proc_id_addr(tSMP_CB* p_cb, tSMP_INT_DATA* p_data) {
   SMP_TRACE_DEBUG("%s", __func__);
   smp_update_key_mask(p_cb, SMP_SEC_KEY_TYPE_ID, true);
 
-  STREAM_TO_UINT8(pid_key.addr_type, p);
-  STREAM_TO_BDADDR(pid_key.static_addr, p);
+  STREAM_TO_UINT8(pid_key.identity_addr_type, p);
+  STREAM_TO_BDADDR(pid_key.identity_addr, p);
   pid_key.irk = p_cb->tk;
 
   /* to use as BD_ADDR for lk derived from ltk */
   p_cb->id_addr_rcvd = true;
-  p_cb->id_addr_type = pid_key.addr_type;
-  p_cb->id_addr = pid_key.static_addr;
+  p_cb->id_addr_type = pid_key.identity_addr_type;
+  p_cb->id_addr = pid_key.identity_addr;
 
   /* store the ID key from peer device */
   if ((p_cb->peer_auth_req & SMP_AUTH_BOND) &&
@@ -1867,6 +1869,11 @@ void smp_link_encrypted(const RawAddress& bda, uint8_t encr_enable) {
     smp_int_data.status = encr_enable;
     smp_sm_event(&smp_cb, SMP_ENCRYPTED_EVT, &smp_int_data);
   }
+}
+
+void smp_cancel_start_encryption_attempt() {
+  SMP_TRACE_ERROR("%s: Encryption request cancelled", __func__);
+  smp_sm_event(&smp_cb, SMP_DISCARD_SEC_REQ_EVT, NULL);
 }
 
 /*******************************************************************************

@@ -59,12 +59,12 @@
 #include "btif_storage.h"
 #include "btif_util.h"
 #include "btu.h"
+#include "common/metrics.h"
 #include "device/include/controller.h"
 #include "device/include/interop.h"
 #include "internal_include/stack_config.h"
 #include "osi/include/allocator.h"
 #include "osi/include/log.h"
-#include "osi/include/metrics.h"
 #include "osi/include/osi.h"
 #include "osi/include/properties.h"
 #include "stack/btm/btm_int.h"
@@ -1155,7 +1155,7 @@ static void btif_dm_auth_cmpl_evt(tBTA_DM_AUTH_CMPL* p_auth_cmpl) {
           btif_dm_cb_create_bond(bd_addr, BTA_TRANSPORT_UNKNOWN);
           return;
         }
-      /* Fall-through */
+        FALLTHROUGH_INTENDED; /* FALLTHROUGH */
       case HCI_ERR_CONNECTION_TOUT:
         status = BT_STATUS_RMT_DEV_DOWN;
         break;
@@ -1338,7 +1338,7 @@ static void btif_dm_search_devices_evt(uint16_t event, char* p_param) {
     } break;
 
     case BTA_DM_INQ_CMPL_EVT: {
-      do_in_bta_thread(
+      do_in_main_thread(
           FROM_HERE,
           base::Bind(&BTM_BleAdvFilterParamSetup, BTM_BLE_SCAN_COND_DELETE, 0,
                      nullptr, base::Bind(&bte_scan_filt_param_cfg_evt, 0)));
@@ -1360,7 +1360,7 @@ static void btif_dm_search_devices_evt(uint16_t event, char* p_param) {
       if (!btif_dm_inquiry_in_progress) {
         btgatt_filt_param_setup_t adv_filt_param;
         memset(&adv_filt_param, 0, sizeof(btgatt_filt_param_setup_t));
-        do_in_bta_thread(
+        do_in_main_thread(
             FROM_HERE,
             base::Bind(&BTM_BleAdvFilterParamSetup, BTM_BLE_SCAN_COND_DELETE, 0,
                        nullptr, base::Bind(&bte_scan_filt_param_cfg_evt, 0)));
@@ -2137,7 +2137,7 @@ bt_status_t btif_dm_start_discovery(void) {
   BTIF_TRACE_EVENT("%s", __func__);
 
   /* Cleanup anything remaining on index 0 */
-  do_in_bta_thread(
+  do_in_main_thread(
       FROM_HERE,
       base::Bind(&BTM_BleAdvFilterParamSetup, BTM_BLE_SCAN_COND_DELETE, 0,
                  nullptr, base::Bind(&bte_scan_filt_param_cfg_evt, 0)));
@@ -2150,7 +2150,7 @@ bt_status_t btif_dm_start_discovery(void) {
   adv_filt_param->list_logic_type = BTA_DM_BLE_PF_LIST_LOGIC_OR;
   adv_filt_param->rssi_low_thres = LOWEST_RSSI_VALUE;
   adv_filt_param->rssi_high_thres = LOWEST_RSSI_VALUE;
-  do_in_bta_thread(
+  do_in_main_thread(
       FROM_HERE, base::Bind(&BTM_BleAdvFilterParamSetup, BTM_BLE_SCAN_COND_ADD,
                             0, base::Passed(&adv_filt_param),
                             base::Bind(&bte_scan_filt_param_cfg_evt, 0)));
@@ -2857,10 +2857,23 @@ static void btif_dm_ble_auth_cmpl_evt(tBTA_DM_AUTH_CMPL* p_auth_cmpl) {
       case BTA_DM_AUTH_SMP_PAIR_AUTH_FAIL:
       case BTA_DM_AUTH_SMP_CONFIRM_VALUE_FAIL:
       case BTA_DM_AUTH_SMP_UNKNOWN_ERR:
-      case BTA_DM_AUTH_SMP_CONN_TOUT:
         btif_dm_remove_ble_bonding_keys();
         status = BT_STATUS_AUTH_FAILURE;
         break;
+
+      case BTA_DM_AUTH_SMP_CONN_TOUT: {
+        if (btm_sec_is_a_bonded_dev(bd_addr)) {
+          LOG(INFO) << __func__ << " Bonded device addr=" << bd_addr
+                    << " timed out - will not remove the keys";
+          // Don't send state change to upper layers - otherwise Java think we
+          // unbonded, and will disconnect HID profile.
+          return;
+        }
+
+        btif_dm_remove_ble_bonding_keys();
+        status = BT_STATUS_AUTH_FAILURE;
+        break;
+      }
       case BTA_DM_AUTH_SMP_PAIR_NOT_SUPPORT:
         status = BT_STATUS_AUTH_REJECTED;
         break;
@@ -3230,26 +3243,26 @@ static void btif_stats_add_bond_event(const RawAddress& bd_addr,
   int type;
   btif_get_device_type(bd_addr, &type);
 
-  system_bt_osi::device_type_t device_type;
+  bluetooth::common::device_type_t device_type;
   switch (type) {
     case BT_DEVICE_TYPE_BREDR:
-      device_type = system_bt_osi::DEVICE_TYPE_BREDR;
+      device_type = bluetooth::common::DEVICE_TYPE_BREDR;
       break;
     case BT_DEVICE_TYPE_BLE:
-      device_type = system_bt_osi::DEVICE_TYPE_LE;
+      device_type = bluetooth::common::DEVICE_TYPE_LE;
       break;
     case BT_DEVICE_TYPE_DUMO:
-      device_type = system_bt_osi::DEVICE_TYPE_DUMO;
+      device_type = bluetooth::common::DEVICE_TYPE_DUMO;
       break;
     default:
-      device_type = system_bt_osi::DEVICE_TYPE_UNKNOWN;
+      device_type = bluetooth::common::DEVICE_TYPE_UNKNOWN;
       break;
   }
 
   uint32_t cod = get_cod(&bd_addr);
   uint64_t ts =
       event->timestamp.tv_sec * 1000 + event->timestamp.tv_nsec / 1000000;
-  system_bt_osi::BluetoothMetricsLogger::GetInstance()->LogPairEvent(
+  bluetooth::common::BluetoothMetricsLogger::GetInstance()->LogPairEvent(
       0, ts, cod, device_type);
 }
 

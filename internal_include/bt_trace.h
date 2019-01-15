@@ -66,7 +66,7 @@ static const char BTE_LOGMSG_MODULE[] = "bte_logmsg_module";
 #define BTTRC_ID_STK_SPP 39
 #define BTTRC_ID_STK_TCS 40
 #define BTTRC_ID_STK_VDP 41
-#define BTTRC_ID_STK_MCAP 42
+#define BTTRC_ID_STK_MCAP 42 /* OBSOLETE */
 #define BTTRC_ID_STK_GATT 43
 #define BTTRC_ID_STK_SMP 44
 #define BTTRC_ID_STK_NFC 45
@@ -180,10 +180,6 @@ static const char BTE_LOGMSG_MODULE[] = "bte_logmsg_module";
 
 #ifndef AVRC_INITIAL_TRACE_LEVEL
 #define AVRC_INITIAL_TRACE_LEVEL BT_TRACE_LEVEL_WARNING
-#endif
-
-#ifndef MCA_INITIAL_TRACE_LEVEL
-#define MCA_INITIAL_TRACE_LEVEL BT_TRACE_LEVEL_WARNING
 #endif
 
 #ifndef HID_INITIAL_TRACE_LEVEL
@@ -556,33 +552,6 @@ static const char BTE_LOGMSG_MODULE[] = "bte_logmsg_module";
       BT_TRACE(TRACE_LAYER_AVP, TRACE_TYPE_API, ##__VA_ARGS__); \
   }
 
-/* MCAP */
-#define MCA_TRACE_ERROR(...)                                      \
-  {                                                               \
-    if (mca_cb.trace_level >= BT_TRACE_LEVEL_ERROR)               \
-      BT_TRACE(TRACE_LAYER_MCA, TRACE_TYPE_ERROR, ##__VA_ARGS__); \
-  }
-#define MCA_TRACE_WARNING(...)                                      \
-  {                                                                 \
-    if (mca_cb.trace_level >= BT_TRACE_LEVEL_WARNING)               \
-      BT_TRACE(TRACE_LAYER_MCA, TRACE_TYPE_WARNING, ##__VA_ARGS__); \
-  }
-#define MCA_TRACE_EVENT(...)                                      \
-  {                                                               \
-    if (mca_cb.trace_level >= BT_TRACE_LEVEL_EVENT)               \
-      BT_TRACE(TRACE_LAYER_MCA, TRACE_TYPE_EVENT, ##__VA_ARGS__); \
-  }
-#define MCA_TRACE_DEBUG(...)                                      \
-  {                                                               \
-    if (mca_cb.trace_level >= BT_TRACE_LEVEL_DEBUG)               \
-      BT_TRACE(TRACE_LAYER_MCA, TRACE_TYPE_DEBUG, ##__VA_ARGS__); \
-  }
-#define MCA_TRACE_API(...)                                      \
-  {                                                             \
-    if (mca_cb.trace_level >= BT_TRACE_LEVEL_API)               \
-      BT_TRACE(TRACE_LAYER_MCA, TRACE_TYPE_API, ##__VA_ARGS__); \
-  }
-
 /* Define tracing for the SMP unit */
 #define SMP_TRACE_ERROR(...)                                      \
   {                                                               \
@@ -729,7 +698,7 @@ void LogMsg(uint32_t trace_set_mask, const char* fmt_str, ...);
 
 #include <base/logging.h>
 
-/* Prints intergral parameter x as hex string, with '0' fill */
+/* Prints integral parameter x as hex string, with '0' fill */
 template <typename T>
 std::string loghex(T x) {
   static_assert(std::is_integral<T>::value,
@@ -737,6 +706,19 @@ std::string loghex(T x) {
   std::stringstream tmp;
   tmp << std::showbase << std::internal << std::hex << std::setfill('0')
       << std::setw((sizeof(T) * 2) + 2) << +x;
+  return tmp.str();
+}
+
+/* Prints integral array as hex string, with '0' fill */
+template <typename T, size_t N>
+std::string loghex(std::array<T, N> array) {
+  static_assert(std::is_integral<T>::value,
+                "type stored in array must be integral.");
+  std::stringstream tmp;
+  for (const auto& x : array) {
+    tmp << std::internal << std::hex << std::setfill('0')
+        << std::setw((sizeof(uint8_t) * 2) + 2) << +x;
+  }
   return tmp.str();
 }
 

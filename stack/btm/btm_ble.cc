@@ -46,8 +46,6 @@
 
 extern void gatt_notify_phy_updated(uint8_t status, uint16_t handle,
                                     uint8_t tx_phy, uint8_t rx_phy);
-extern void btm_ble_advertiser_notify_terminated_legacy(
-    uint8_t status, uint16_t connection_handle);
 
 /******************************************************************************/
 /* External Function to be called by other modules                            */
@@ -471,7 +469,7 @@ void BTM_BleSetConnScanParams(uint32_t scan_interval, uint32_t scan_window) {
       new_param = true;
     }
 
-    if (new_param && p_ble_cb->conn_state == BLE_BG_CONN) {
+    if (new_param && btm_ble_get_conn_st() == BLE_CONNECTING) {
       btm_ble_suspend_bg_conn();
     }
   } else {
@@ -1294,16 +1292,17 @@ void btm_sec_save_le_key(const RawAddress& bd_addr, tBTM_LE_KEY_TYPE key_type,
 
       case BTM_LE_KEY_PID:
         p_rec->ble.keys.irk = p_keys->pid_key.irk;
-        p_rec->ble.static_addr = p_keys->pid_key.static_addr;
-        p_rec->ble.static_addr_type = p_keys->pid_key.addr_type;
+        p_rec->ble.identity_addr = p_keys->pid_key.identity_addr;
+        p_rec->ble.identity_addr_type = p_keys->pid_key.identity_addr_type;
         p_rec->ble.key_type |= BTM_LE_KEY_PID;
         BTM_TRACE_DEBUG(
             "%s: BTM_LE_KEY_PID key_type=0x%x save peer IRK, change bd_addr=%s "
-            "to static_addr=%s",
+            "to id_addr=%s id_addr_type=0x%x",
             __func__, p_rec->ble.key_type, p_rec->bd_addr.ToString().c_str(),
-            p_keys->pid_key.static_addr.ToString().c_str());
-        /* update device record address as static address */
-        p_rec->bd_addr = p_keys->pid_key.static_addr;
+            p_keys->pid_key.identity_addr.ToString().c_str(),
+            p_keys->pid_key.identity_addr_type);
+        /* update device record address as identity address */
+        p_rec->bd_addr = p_keys->pid_key.identity_addr;
         /* combine DUMO device security record if needed */
         btm_consolidate_dev(p_rec);
         break;
@@ -1534,6 +1533,7 @@ tBTM_STATUS btm_ble_set_encryption(const RawAddress& bd_addr,
       }
     /* if salve role then fall through to call SMP_Pair below which will send a
        sec_request to request the master to encrypt the link */
+      FALLTHROUGH_INTENDED; /* FALLTHROUGH */
     case BTM_BLE_SEC_ENCRYPT_NO_MITM:
     case BTM_BLE_SEC_ENCRYPT_MITM:
       auth_req = (sec_act == BTM_BLE_SEC_ENCRYPT_NO_MITM)
@@ -1885,126 +1885,6 @@ void btm_ble_connected(const RawAddress& bda, uint16_t handle, uint8_t enc_mode,
 }
 
 /*****************************************************************************
- *  Function        btm_ble_conn_complete
- *
- *  Description     LE connection complete.
- *
- *****************************************************************************/
-void btm_ble_conn_complete(uint8_t* p, UNUSED_ATTR uint16_t evt_len,
-                           bool enhanced) {
-#if (BLE_PRIVACY_SPT == TRUE)
-  uint8_t peer_addr_type;
-#endif
-  RawAddress local_rpa, peer_rpa;
-  uint8_t role, status, bda_type;
-  uint16_t handle;
-  RawAddress bda;
-  uint16_t conn_interval, conn_latency, conn_timeout;
-  bool match = false;
-
-  STREAM_TO_UINT8(status, p);
-  STREAM_TO_UINT16(handle, p);
-  STREAM_TO_UINT8(role, p);
-  STREAM_TO_UINT8(bda_type, p);
-  STREAM_TO_BDADDR(bda, p);
-
-  if (status == 0) {
-    if (enhanced) {
-      STREAM_TO_BDADDR(local_rpa, p);
-      STREAM_TO_BDADDR(peer_rpa, p);
-    }
-
-    STREAM_TO_UINT16(conn_interval, p);
-    STREAM_TO_UINT16(conn_latency, p);
-    STREAM_TO_UINT16(conn_timeout, p);
-    handle = HCID_GET_HANDLE(handle);
-
-#if (BLE_PRIVACY_SPT == TRUE)
-    peer_addr_type = bda_type;
-    match = btm_identity_addr_to_random_pseudo(&bda, &bda_type, true);
-
-    /* possiblly receive connection complete with resolvable random while
-       the device has been paired */
-    if (!match && BTM_BLE_IS_RESOLVE_BDA(bda)) {
-      tBTM_SEC_DEV_REC* match_rec = btm_ble_resolve_random_addr(bda);
-      if (match_rec) {
-        LOG_INFO(LOG_TAG, "%s matched and resolved random address", __func__);
-        match = true;
-        match_rec->ble.active_addr_type = BTM_BLE_ADDR_RRA;
-        match_rec->ble.cur_rand_addr = bda;
-        if (!btm_ble_init_pseudo_addr(match_rec, bda)) {
-          /* assign the original address to be the current report address */
-          bda = match_rec->ble.pseudo_addr;
-        } else {
-          bda = match_rec->bd_addr;
-        }
-      } else {
-        LOG_INFO(LOG_TAG, "%s unable to match and resolve random address",
-                 __func__);
-      }
-    }
-#endif
-
-    btm_ble_connected(bda, handle, HCI_ENCRYPT_MODE_DISABLED, role, bda_type,
-                      match);
-
-    l2cble_conn_comp(handle, role, bda, bda_type, conn_interval, conn_latency,
-                     conn_timeout);
-
-#if (BLE_PRIVACY_SPT == TRUE)
-    if (enhanced) {
-      btm_ble_refresh_local_resolvable_private_addr(bda, local_rpa);
-
-      if (peer_addr_type & BLE_ADDR_TYPE_ID_BIT)
-        btm_ble_refresh_peer_resolvable_private_addr(bda, peer_rpa,
-                                                     BLE_ADDR_RANDOM);
-    }
-#endif
-  } else {
-    role = HCI_ROLE_UNKNOWN;
-    if (status != HCI_ERR_ADVERTISING_TIMEOUT) {
-      btm_ble_set_conn_st(BLE_CONN_IDLE);
-#if (BLE_PRIVACY_SPT == TRUE)
-      btm_ble_disable_resolving_list(BTM_BLE_RL_INIT, true);
-#endif
-    } else {
-#if (BLE_PRIVACY_SPT == TRUE)
-      btm_cb.ble_ctr_cb.inq_var.adv_mode = BTM_BLE_ADV_DISABLE;
-      btm_ble_disable_resolving_list(BTM_BLE_RL_ADV, true);
-#endif
-    }
-  }
-
-  btm_ble_update_mode_operation(role, &bda, status);
-
-  if (role == HCI_ROLE_SLAVE)
-    btm_ble_advertiser_notify_terminated_legacy(status, handle);
-}
-
-/*****************************************************************************
- * Function btm_ble_create_ll_conn_complete
- *
- * Description LE connection complete.
- *
- *****************************************************************************/
-void btm_ble_create_ll_conn_complete(uint8_t status) {
-  if (status == HCI_SUCCESS) return;
-
-  btm_ble_set_conn_st(BLE_CONN_IDLE);
-  btm_ble_update_mode_operation(HCI_ROLE_UNKNOWN, NULL, status);
-
-  LOG(WARNING) << "LE Create Connection attempt failed, status="
-               << loghex(status);
-
-  if (status == HCI_ERR_COMMAND_DISALLOWED) {
-    /* There is already either direct connect, or whitelist connection
-     * pending, but we don't know which one, or to which state should we
-     * transition now. This can be triggered only in case of rare race
-     * condition. Crash to recover. */
-    LOG(FATAL) << "LE Create Connection - command disallowed";
-  }
-}
-/*****************************************************************************
  *  Function        btm_proc_smp_cback
  *
  *  Description     This function is the SMP callback handler.
@@ -2033,8 +1913,8 @@ uint8_t btm_proc_smp_cback(tSMP_EVT event, const RawAddress& bd_addr,
       case SMP_OOB_REQ_EVT:
       case SMP_NC_REQ_EVT:
       case SMP_SC_OOB_REQ_EVT:
-        /* fall through */
         p_dev_rec->sec_flags |= BTM_SEC_LE_AUTHENTICATED;
+        FALLTHROUGH_INTENDED; /* FALLTHROUGH */
 
       case SMP_SEC_REQUEST_EVT:
         if (event == SMP_SEC_REQUEST_EVT &&
@@ -2045,7 +1925,7 @@ uint8_t btm_proc_smp_cback(tSMP_EVT event, const RawAddress& bd_addr,
         btm_cb.pairing_bda = bd_addr;
         p_dev_rec->sec_state = BTM_SEC_STATE_AUTHENTICATING;
         btm_cb.pairing_flags |= BTM_PAIR_FLAGS_LE_ACTIVE;
-      /* fall through */
+        FALLTHROUGH_INTENDED; /* FALLTHROUGH */
 
       case SMP_COMPLT_EVT:
         if (btm_cb.api.p_le_callback) {
@@ -2456,11 +2336,6 @@ void btm_ble_set_random_address(const RawAddress& random_bda) {
   bool adv_mode = btm_cb.ble_ctr_cb.inq_var.adv_mode;
 
   BTM_TRACE_DEBUG("%s", __func__);
-  if (btm_ble_get_conn_st() == BLE_DIR_CONN) {
-    BTM_TRACE_ERROR("%s: Cannot set random address. Direct conn ongoing",
-                    __func__);
-    return;
-  }
 
   if (adv_mode == BTM_BLE_ADV_ENABLE)
     btsnd_hcic_ble_set_adv_enable(BTM_BLE_ADV_DISABLE);

@@ -152,10 +152,8 @@ void l2cu_release_lcb(tL2C_LCB* p_lcb) {
   /* Release any unfinished L2CAP packet on this link */
   osi_free_and_reset((void**)&p_lcb->p_hcit_rcv_acl);
 
-#if (BTM_SCO_INCLUDED == TRUE)
   if (p_lcb->transport == BT_TRANSPORT_BR_EDR) /* Release all SCO links */
     btm_remove_sco_links(p_lcb->remote_bd_addr);
-#endif
 
   if (p_lcb->sent_not_acked > 0) {
     if (p_lcb->transport == BT_TRANSPORT_LE) {
@@ -170,11 +168,6 @@ void l2cu_release_lcb(tL2C_LCB* p_lcb) {
       }
     }
   }
-
-  // Reset BLE connecting flag only if the address matches
-  if (p_lcb->transport == BT_TRANSPORT_LE &&
-      l2cb.ble_connecting_bda == p_lcb->remote_bd_addr)
-    l2cb.is_ble_connecting = false;
 
 #if (L2CAP_NUM_FIXED_CHNLS > 0)
   l2cu_process_fixed_disc_cback(p_lcb);
@@ -1633,7 +1626,7 @@ void l2cu_release_ccb(tL2C_CCB* p_ccb) {
         /* Link is still active, adjust channel quotas. */
         l2c_link_adjust_chnl_allocation();
       }
-    } else if (p_lcb->link_state == LST_CONNECTING && !l2cb.is_ble_connecting) {
+    } else if (p_lcb->link_state == LST_CONNECTING) {
       if (!p_lcb->ccb_queue.p_first_ccb) {
         if (p_lcb->transport == BT_TRANSPORT_LE &&
             p_ccb->local_cid == L2CAP_ATT_CID) {
@@ -2107,45 +2100,36 @@ void l2cu_device_reset(void) {
       l2c_link_hci_disc_comp(p_lcb->handle, (uint8_t)-1);
     }
   }
-  l2cb.is_ble_connecting = false;
 }
 
-/*******************************************************************************
- *
- * Function         l2cu_create_conn
- *
- * Description      This function initiates an acl connection via HCI
- *
- * Returns          true if successful, false if get buffer fails.
- *
- ******************************************************************************/
-bool l2cu_create_conn(tL2C_LCB* p_lcb, tBT_TRANSPORT transport) {
+bool l2cu_create_conn_le(tL2C_LCB* p_lcb) {
   uint8_t phy = controller_get_interface()->get_le_all_initiating_phys();
-  return l2cu_create_conn(p_lcb, transport, phy);
+  return l2cu_create_conn_le(p_lcb, phy);
 }
 
-bool l2cu_create_conn(tL2C_LCB* p_lcb, tBT_TRANSPORT transport,
-                      uint8_t initiating_phys) {
-  int xx;
-  tL2C_LCB* p_lcb_cur = &l2cb.lcb_pool[0];
-#if (BTM_SCO_INCLUDED == TRUE)
-  bool is_sco_active;
-#endif
-
+/* This function initiates an acl connection to a LE device.
+ * Returns true if request started successfully, false otherwise. */
+bool l2cu_create_conn_le(tL2C_LCB* p_lcb, uint8_t initiating_phys) {
   tBT_DEVICE_TYPE dev_type;
   tBLE_ADDR_TYPE addr_type;
 
   BTM_ReadDevInfo(p_lcb->remote_bd_addr, &dev_type, &addr_type);
 
-  if (transport == BT_TRANSPORT_LE) {
-    if (!controller_get_interface()->supports_ble()) return false;
+  if (!controller_get_interface()->supports_ble()) return false;
 
-    p_lcb->ble_addr_type = addr_type;
-    p_lcb->transport = BT_TRANSPORT_LE;
-    p_lcb->initiating_phys = initiating_phys;
+  p_lcb->ble_addr_type = addr_type;
+  p_lcb->transport = BT_TRANSPORT_LE;
+  p_lcb->initiating_phys = initiating_phys;
 
-    return (l2cble_create_conn(p_lcb));
-  }
+  return (l2cble_create_conn(p_lcb));
+}
+
+/* This function initiates an acl connection to a Classic device via HCI.
+ * Returns true on success, false otherwise. */
+bool l2cu_create_conn_br_edr(tL2C_LCB* p_lcb) {
+  int xx;
+  tL2C_LCB* p_lcb_cur = &l2cb.lcb_pool[0];
+  bool is_sco_active;
 
   /* If there is a connection where we perform as a slave, try to switch roles
      for this connection */
@@ -2154,7 +2138,6 @@ bool l2cu_create_conn(tL2C_LCB* p_lcb, tBT_TRANSPORT transport,
     if (p_lcb_cur == p_lcb) continue;
 
     if ((p_lcb_cur->in_use) && (p_lcb_cur->link_role == HCI_ROLE_SLAVE)) {
-#if (BTM_SCO_INCLUDED == TRUE)
       /* The LMP_switch_req shall be sent only if the ACL logical transport
       is in active mode, when encryption is disabled, and all synchronous
       logical transports on the same physical link are disabled." */
@@ -2168,7 +2151,6 @@ bool l2cu_create_conn(tL2C_LCB* p_lcb, tBT_TRANSPORT transport,
 
       if (is_sco_active)
         continue; /* No Master Slave switch not allowed when SCO Active */
-#endif
       /*4_1_TODO check  if btm_cb.devcb.local_features to be used instead */
       if (HCI_SWITCH_SUPPORTED(BTM_ReadLocalFeatures())) {
         /* mark this lcb waiting for switch to be completed and
@@ -2617,6 +2599,12 @@ void l2cu_no_dynamic_ccbs(tL2C_LCB* p_lcb) {
   for (xx = 0; xx < L2CAP_NUM_FIXED_CHNLS; xx++) {
     if ((p_lcb->p_fixed_ccbs[xx] != NULL) &&
         (p_lcb->p_fixed_ccbs[xx]->fixed_chnl_idle_tout * 1000 > timeout_ms)) {
+
+      if (p_lcb->p_fixed_ccbs[xx]->fixed_chnl_idle_tout == L2CAP_NO_IDLE_TIMEOUT) {
+         L2CAP_TRACE_DEBUG("%s NO IDLE timeout set for fixed cid 0x%04x", __func__,
+            p_lcb->p_fixed_ccbs[xx]->local_cid);
+         start_timeout = false;
+      }
       timeout_ms = p_lcb->p_fixed_ccbs[xx]->fixed_chnl_idle_tout * 1000;
     }
   }

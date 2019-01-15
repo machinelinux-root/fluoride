@@ -36,6 +36,7 @@
 #include <hardware/bluetooth_headset_callbacks.h>
 #include <hardware/bluetooth_headset_interface.h>
 #include <hardware/bt_hf.h>
+#include <log/log.h>
 
 #include "bta/include/utl.h"
 #include "bta_ag_api.h"
@@ -43,7 +44,7 @@
 #include "btif_hf.h"
 #include "btif_profile_queue.h"
 #include "btif_util.h"
-#include "osi/include/metrics.h"
+#include "common/metrics.h"
 
 namespace bluetooth {
 namespace headset {
@@ -331,7 +332,7 @@ static void btif_hf_upstreams_evt(uint16_t event, char* p_param) {
         btif_hf_cb[idx].state = BTHF_CONNECTION_STATE_CONNECTED;
         btif_hf_cb[idx].peer_feat = 0;
         clear_phone_state_multihf(&btif_hf_cb[idx]);
-        system_bt_osi::BluetoothMetricsLogger::GetInstance()
+        bluetooth::common::BluetoothMetricsLogger::GetInstance()
             ->LogHeadsetProfileRfcConnection(p_data->open.service_id);
         bt_hf_callbacks->ConnectionStateCallback(
             btif_hf_cb[idx].state, &btif_hf_cb[idx].connected_bda);
@@ -699,7 +700,7 @@ class HeadsetInterface : Interface {
   bt_status_t PhoneStateChange(int num_active, int num_held,
                                bthf_call_state_t call_setup_state,
                                const char* number, bthf_call_addrtype_t type,
-                               RawAddress* bd_addr) override;
+                               const char* name, RawAddress* bd_addr) override;
 
   void Cleanup() override;
   bt_status_t SetScoAllowed(bool value) override;
@@ -1020,12 +1021,20 @@ bt_status_t HeadsetInterface::ClccResponse(
         dialnum[newidx++] = '+';
       }
       for (size_t i = 0; number[i] != 0; i++) {
+        if (newidx >= (sizeof(dialnum) - res_strlen - 1)) {
+          android_errorWriteLog(0x534e4554, "79266386");
+          break;
+        }
         if (utl_isdialchar(number[i])) {
           dialnum[newidx++] = number[i];
         }
       }
       dialnum[newidx] = 0;
-      snprintf(&ag_res.str[res_strlen], rem_bytes, ",\"%s\",%d", dialnum, type);
+      // Reserve 5 bytes for ["][,][3_digit_type]
+      snprintf(&ag_res.str[res_strlen], rem_bytes - 5, ",\"%s", dialnum);
+      std::stringstream remaining_string;
+      remaining_string << "\"," << type;
+      strncat(&ag_res.str[res_strlen], remaining_string.str().c_str(), 5);
     }
   }
   BTA_AgResult(btif_hf_cb[idx].handle, BTA_AG_CLCC_RES, ag_res);
@@ -1034,7 +1043,8 @@ bt_status_t HeadsetInterface::ClccResponse(
 
 bt_status_t HeadsetInterface::PhoneStateChange(
     int num_active, int num_held, bthf_call_state_t call_setup_state,
-    const char* number, bthf_call_addrtype_t type, RawAddress* bd_addr) {
+    const char* number, bthf_call_addrtype_t type, const char* name,
+    RawAddress* bd_addr) {
   CHECK_BTHF_INIT();
   if (!bd_addr) {
     BTIF_TRACE_WARNING("%s: bd_addr is null", __func__);
@@ -1166,15 +1176,53 @@ bt_status_t HeadsetInterface::PhoneStateChange(
           }
         }
         if (number) {
-          int xx = 0;
-          if ((type == BTHF_CALL_ADDRTYPE_INTERNATIONAL) && (*number != '+'))
-            xx = snprintf(ag_res.str, sizeof(ag_res.str), "\"+%s\"", number);
-          else
-            xx = snprintf(ag_res.str, sizeof(ag_res.str), "\"%s\"", number);
-          ag_res.num = type;
+          std::ostringstream call_number_stream;
+          if ((type == BTHF_CALL_ADDRTYPE_INTERNATIONAL) && (*number != '+')) {
+            call_number_stream << "\"+";
+          } else {
+            call_number_stream << "\"";
+          }
 
-          if (res == BTA_AG_CALL_WAIT_RES)
-            snprintf(&ag_res.str[xx], sizeof(ag_res.str) - xx, ",%d", type);
+          std::string name_str;
+          if (name) {
+            name_str.append(name);
+          }
+          std::string number_str(number);
+          // 13 = ["][+]["][,][3_digit_type][,,,]["]["][null_terminator]
+          int overflow_size =
+              13 + static_cast<int>(number_str.length() + name_str.length()) -
+              static_cast<int>(sizeof(ag_res.str));
+          if (overflow_size > 0) {
+            android_errorWriteLog(0x534e4554, "79431031");
+            int extra_overflow_size =
+                overflow_size - static_cast<int>(name_str.length());
+            if (extra_overflow_size > 0) {
+              number_str.resize(number_str.length() - extra_overflow_size);
+              name_str.clear();
+            } else {
+              name_str.resize(name_str.length() - overflow_size);
+            }
+          }
+          call_number_stream << number_str << "\"";
+
+          // Store caller id string and append type info.
+          // Make sure type info is valid, otherwise add 129 as default type
+          ag_res.num = static_cast<uint16_t>(type);
+          if ((ag_res.num < BTA_AG_CLIP_TYPE_MIN) ||
+              (ag_res.num > BTA_AG_CLIP_TYPE_MAX)) {
+            if (ag_res.num != BTA_AG_CLIP_TYPE_VOIP) {
+              ag_res.num = BTA_AG_CLIP_TYPE_DEFAULT;
+            }
+          }
+
+          if (res == BTA_AG_CALL_WAIT_RES || name_str.empty()) {
+            call_number_stream << "," << std::to_string(ag_res.num);
+          } else {
+            call_number_stream << "," << std::to_string(ag_res.num) << ",,,\""
+                               << name_str << "\"";
+          }
+          snprintf(ag_res.str, sizeof(ag_res.str), "%s",
+                   call_number_stream.str().c_str());
         }
         break;
       case BTHF_CALL_STATE_DIALING:

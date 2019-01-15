@@ -142,12 +142,7 @@ extern void btm_pm_proc_mode_change(uint8_t hci_status, uint16_t hci_handle,
 extern void btm_pm_proc_ssr_evt(uint8_t* p, uint16_t evt_len);
 extern tBTM_STATUS btm_read_power_mode_state(const RawAddress& remote_bda,
                                              tBTM_PM_STATE* pmState);
-#if (BTM_SCO_INCLUDED == TRUE)
 extern void btm_sco_chk_pend_unpark(uint8_t hci_status, uint16_t hci_handle);
-#else
-#define btm_sco_chk_pend_unpark(hci_status, hci_handle)
-#endif /* BTM_SCO_INCLUDED */
-
 extern void btm_qos_setup_timeout(void* data);
 extern void btm_qos_setup_complete(uint8_t status, uint16_t handle,
                                    FLOW_SPEC* p_flow);
@@ -181,10 +176,6 @@ extern void btm_dev_init(void);
 extern void btm_read_local_name_timeout(void* data);
 extern void btm_read_local_name_complete(uint8_t* p, uint16_t evt_len);
 
-extern void btm_ble_add_2_white_list_complete(uint8_t status);
-extern void btm_ble_remove_from_white_list_complete(uint8_t* p,
-                                                    uint16_t evt_len);
-extern void btm_ble_clear_white_list_complete(uint8_t* p, uint16_t evt_len);
 extern void btm_ble_create_conn_cancel_complete(uint8_t* p);
 extern bool btm_ble_addr_resolvable(const RawAddress& rpa,
                                     tBTM_SEC_DEV_REC* p_dev_rec);

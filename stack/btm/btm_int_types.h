@@ -210,7 +210,7 @@ typedef struct {
 } tINQ_BDADDR;
 
 typedef struct {
-  uint32_t time_of_resp;
+  uint64_t time_of_resp;
   uint32_t
       inq_count; /* "timestamps" the entry with a particular inquiry count   */
                  /* Used for determining if a response has already been      */
@@ -369,20 +369,12 @@ typedef struct {
   esco_data_path_t sco_route; /* HCI, PCM, or TEST */
 } tSCO_CB;
 
-#if (BTM_SCO_INCLUDED == TRUE)
 extern void btm_set_sco_ind_cback(tBTM_SCO_IND_CBACK* sco_ind_cb);
 extern void btm_accept_sco_link(uint16_t sco_inx, enh_esco_params_t* p_setup,
                                 tBTM_SCO_CB* p_conn_cb, tBTM_SCO_CB* p_disc_cb);
 extern void btm_reject_sco_link(uint16_t sco_inx);
 extern void btm_sco_chk_pend_rolechange(uint16_t hci_handle);
 extern void btm_sco_disc_chk_pend_for_modechange(uint16_t hci_handle);
-
-#else
-#define btm_accept_sco_link(sco_inx, p_setup, p_conn_cb, p_disc_cb)
-#define btm_reject_sco_link(sco_inx)
-#define btm_set_sco_ind_cback(sco_ind_cb)
-#define btm_sco_chk_pend_rolechange(hci_handle)
-#endif /* BTM_SCO_INCLUDED */
 
 /*
  * Define structure for Security Service Record.
@@ -440,8 +432,8 @@ typedef struct {
   RawAddress pseudo_addr; /* LE pseudo address of the device if different from
                           device address  */
   tBLE_ADDR_TYPE ble_addr_type; /* LE device type: public or random address */
-  tBLE_ADDR_TYPE static_addr_type; /* static address type */
-  RawAddress static_addr;          /* static address */
+  tBLE_ADDR_TYPE identity_addr_type; /* identity address type */
+  RawAddress identity_addr;          /* identity address */
 
 #define BTM_WHITE_LIST_BIT 0x01
 #define BTM_RESOLVING_LIST_BIT 0x02
@@ -784,12 +776,10 @@ typedef struct {
   *****************************************************/
   tBTM_INQUIRY_VAR_ST btm_inq_vars;
 
-/*****************************************************
-**      SCO Management
-*****************************************************/
-#if (BTM_SCO_INCLUDED == TRUE)
+  /*****************************************************
+  **      SCO Management
+  *****************************************************/
   tSCO_CB sco_cb;
-#endif
 
   /*****************************************************
   **      Security Management
@@ -801,8 +791,7 @@ typedef struct {
 
   tBTM_SEC_DEV_REC* p_collided_dev_rec;
   alarm_t* sec_collision_timer;
-  uint32_t collision_start_time;
-  uint32_t max_collision_delay;
+  uint64_t collision_start_time;
   uint32_t dev_rec_count; /* Counter used for device record timestamp */
   uint8_t security_mode;
   bool pairing_disabled;
