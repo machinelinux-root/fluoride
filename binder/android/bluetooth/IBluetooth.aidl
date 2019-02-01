@@ -17,6 +17,7 @@
 package android.bluetooth;
 
 import android.bluetooth.IBluetoothCallback;
+import android.bluetooth.IBluetoothMetadataListener;
 import android.bluetooth.IBluetoothSocketManager;
 import android.bluetooth.IBluetoothStateChangeCallback;
 import android.bluetooth.BluetoothActivityEnergyInfo;
@@ -93,6 +94,8 @@ interface IBluetooth
     boolean setPairingConfirmation(in BluetoothDevice device, boolean accept);
 
     int getPhonebookAccessPermission(in BluetoothDevice device);
+    boolean setSilenceMode(in BluetoothDevice device, boolean silence);
+    boolean getSilenceMode(in BluetoothDevice device);
     boolean setPhonebookAccessPermission(in BluetoothDevice device, int value);
     int getMessageAccessPermission(in BluetoothDevice device);
     boolean setMessageAccessPermission(in BluetoothDevice device, int value);
@@ -119,6 +122,13 @@ interface IBluetooth
     boolean isLePeriodicAdvertisingSupported();
     int getLeMaximumAdvertisingDataLength();
     BluetoothActivityEnergyInfo reportActivityInfo();
+
+    // For Metadata
+    boolean registerMetadataListener(in IBluetoothMetadataListener listener, in BluetoothDevice device);
+    boolean unregisterMetadataListener(in BluetoothDevice device);
+    boolean setMetadata(in BluetoothDevice device, in int key, in String value);
+    String getMetadata(in BluetoothDevice device, in int key);
+
 
     /**
      * Requests the controller activity info asynchronously.

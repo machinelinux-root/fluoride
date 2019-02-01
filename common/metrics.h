@@ -18,7 +18,9 @@
 
 #pragma once
 
+#include <android/bluetooth/hci/enums.pb.h>
 #include <bta/include/bta_api.h>
+#include <frameworks/base/core/proto/android/bluetooth/enums.pb.h>
 #include <stdint.h>
 #include <memory>
 #include <string>
@@ -276,6 +278,138 @@ class BluetoothMetricsLogger {
   std::unique_ptr<impl> const pimpl_;
 };
 
+/**
+ * Unknown connection handle for metrics purpose
+ */
+static const uint32_t kUnknownConnectionHandle = 0xFFFF;
+
+/**
+ * Log link layer connection event
+ *
+ * @param address Stack wide consistent Bluetooth address of this event,
+ *                nullptr if unknown
+ * @param connection_handle connection handle of this event,
+ *                          {@link kUnknownConnectionHandle} if unknown
+ * @param direction direction of this connection
+ * @param link_type type of the link
+ * @param hci_cmd HCI command opecode associated with this event, if any
+ * @param hci_event HCI event code associated with this event, if any
+ * @param hci_ble_event HCI BLE event code associated with this event, if any
+ * @param cmd_status Command status associated with this event, if any
+ * @param reason_code Reason code associated with this event, if any
+ */
+void LogLinkLayerConnectionEvent(const RawAddress* address,
+                                 uint32_t connection_handle,
+                                 android::bluetooth::DirectionEnum direction,
+                                 uint32_t link_type, uint32_t hci_cmd,
+                                 uint32_t hci_event, uint32_t hci_ble_event,
+                                 uint32_t cmd_status, uint32_t reason_code);
+
+/**
+ * Logs when Bluetooth controller failed to reply with command status within
+ * a timeout period after receiving an HCI command from the host
+ *
+ * @param hci_cmd opcode of HCI command that caused this timeout
+ */
+void LogHciTimeoutEvent(uint32_t hci_cmd);
+
+/**
+ * Logs when we receive Bluetooth Read Remote Version Information Complete
+ * Event from the remote device, as documented by the Bluetooth Core HCI
+ * specification
+ *
+ * Reference: 5.0 Core Specification, Vol 2, Part E, Page 1118
+ *
+ * @param handle handle of associated ACL connection
+ * @param status HCI command status of this event
+ * @param version version code from read remote version complete event
+ * @param manufacturer_name manufacturer code from read remote version complete
+ *                          event
+ * @param subversion subversion code from read remote version complete event
+ */
+void LogRemoteVersionInfo(uint16_t handle, uint8_t status, uint8_t version,
+                          uint16_t manufacturer_name, uint16_t subversion);
+
+/**
+ * Log A2DP audio buffer underrun event
+ *
+ * @param address A2DP device associated with this event
+ * @param encoding_interval_millis encoding interval in milliseconds
+ * @param num_missing_pcm_bytes number of PCM bytes that cannot be read from
+ *                              the source
+ */
+void LogA2dpAudioUnderrunEvent(const RawAddress& address,
+                               uint64_t encoding_interval_millis,
+                               int num_missing_pcm_bytes);
+
+/**
+ * Log A2DP audio buffer overrun event
+ *
+ * @param address A2DP device associated with this event
+ * @param encoding_interval_millis encoding interval in milliseconds
+ * @param num_dropped_buffers number of encoded buffers dropped from Tx queue
+ * @param num_dropped_encoded_frames number of encoded frames dropped from Tx
+ *                                   queue
+ * @param num_dropped_encoded_bytes number of encoded bytes dropped from Tx
+ *                                  queue
+ */
+void LogA2dpAudioOverrunEvent(const RawAddress& address,
+                              uint64_t encoding_interval_millis,
+                              int num_dropped_buffers,
+                              int num_dropped_encoded_frames,
+                              int num_dropped_encoded_bytes);
+
+/**
+ * Log read RSSI result
+ *
+ * @param address device associated with this event
+ * @param handle connection handle of this event,
+ *               {@link kUnknownConnectionHandle} if unknown
+ * @param cmd_status command status from read RSSI command
+ * @param rssi rssi value in dBm
+ */
+void LogReadRssiResult(const RawAddress& address, uint16_t handle,
+                       uint32_t cmd_status, int8_t rssi);
+
+/**
+ * Log failed contact counter report
+ *
+ * @param address device associated with this event
+ * @param handle connection handle of this event,
+ *               {@link kUnknownConnectionHandle} if unknown
+ * @param cmd_status command status from read failed contact counter command
+ * @param failed_contact_counter Number of consecutive failed contacts for a
+ *                               connection corresponding to the Handle
+ */
+void LogReadFailedContactCounterResult(const RawAddress& address,
+                                       uint16_t handle, uint32_t cmd_status,
+                                       int32_t failed_contact_counter);
+
+/**
+ * Log transmit power level for a particular device after read
+ *
+ * @param address device associated with this event
+ * @param handle connection handle of this event,
+ *               {@link kUnknownConnectionHandle} if unknown
+ * @param cmd_status command status from read failed contact counter command
+ * @param transmit_power_level transmit power level for connection to this
+ *                             device
+ */
+void LogReadTxPowerLevelResult(const RawAddress& address, uint16_t handle,
+                               uint32_t cmd_status,
+                               int32_t transmit_power_level);
+
+/**
+ * Logs when there is an event related to Bluetooth Security Manager Protocol
+ *
+ * @param address address of associated device
+ * @param smp_cmd SMP command code associated with this event
+ * @param direction direction of this SMP command
+ * @param smp_fail_reason SMP pairing failure reason code from SMP spec
+ */
+void LogSmpPairingEvent(const RawAddress& address, uint8_t smp_cmd,
+                        android::bluetooth::DirectionEnum direction,
+                        uint8_t smp_fail_reason);
 }  // namespace common
 
 }  // namespace bluetooth
