@@ -194,9 +194,7 @@ tBTA_JV_RFC_CB* bta_jv_alloc_rfc_cb(uint16_t port_handle,
     }
   }
   if (p_cb == NULL) {
-    LOG(ERROR) << __func__ << "port_handle=" << port_handle
-               << " ctrl block exceeds limit:" << port_handle,
-        BTA_JV_MAX_RFC_CONN;
+    LOG(ERROR) << __func__ << "port_handle=" << port_handle << " ctrl block exceeds limit:" << BTA_JV_MAX_RFC_CONN;
   }
   return p_cb;
 }
@@ -789,7 +787,7 @@ void bta_jv_start_discovery(const RawAddress& bd_addr, uint16_t num_uuid,
   }
 
   /* init the database/set up the filter */
-  VLOG(2) << __func__ << ": call SDP_InitDiscoveryDb, num_uuid=", num_uuid;
+  VLOG(2) << __func__ << ": call SDP_InitDiscoveryDb, num_uuid=" << num_uuid;
   SDP_InitDiscoveryDb(p_bta_jv_cfg->p_sdp_db, p_bta_jv_cfg->sdp_db_size,
                       num_uuid, uuid_list, 0, NULL);
 
@@ -2119,11 +2117,12 @@ static void fcchan_data_cbk(uint16_t chan, const RawAddress& bd_addr,
   if (tc) {
     // try to find an open socked for that addr and channel
     t = fcclient_find_by_addr(tc->clients, &bd_addr);
-    if (!t) {
-      // no socket -> drop it
-      return;
-    }
   }
+  if (!t) {
+    // no socket -> drop it
+    return;
+  }
+
 
   sock_cback = t->p_cback;
   sock_id = t->l2cap_socket_id;
@@ -2166,13 +2165,17 @@ void bta_jv_l2cap_connect_le(uint16_t remote_chan,
   // it could have been deleted/moved from under us, so re-find it */
   t = fcclient_find_by_id(id);
   if (t) {
-    if (evt.l2c_cl_init.status == BTA_JV_SUCCESS)
+    if (evt.l2c_cl_init.status == BTA_JV_SUCCESS) {
       call_init_f = !t->init_called;
-    else
+    } else {
       fcclient_free(t);
+      t = NULL;
+    }
   }
   if (call_init_f) p_cback(BTA_JV_L2CAP_CL_INIT_EVT, &evt, l2cap_socket_id);
-  t->init_called = true;
+  if (t) {
+    t->init_called = true;
+  }
 }
 
 /* stops an LE L2CAP server */

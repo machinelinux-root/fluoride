@@ -1,6 +1,9 @@
 cc_library_static {
     name: "libbt-common",
-    defaults: ["fluoride_defaults"],
+    defaults: [
+        "fluoride_defaults",
+        "clang_file_coverage",
+    ],
     host_supported: true,
     include_dirs: [
         "system/bt",
@@ -25,7 +28,10 @@ cc_library_static {
 cc_test {
     name: "bluetooth_test_common",
     test_suites: ["device-tests"],
-    defaults: ["fluoride_defaults"],
+    defaults: [
+        "fluoride_defaults",
+        "clang_coverage_bin",
+    ],
     host_supported: true,
     include_dirs: [
         "system/bt",
@@ -77,12 +83,16 @@ cc_test {
 
 cc_benchmark {
     name: "bluetooth_benchmark_thread_performance",
-    defaults: ["fluoride_defaults"],
+    defaults: [
+        "fluoride_defaults",
+    ],
+    host_supported: true,
     include_dirs: ["system/bt"],
     srcs: [
         "benchmark/thread_performance_benchmark.cc",
     ],
     shared_libs: [
+        "libcrypto",
         "liblog",
     ],
     static_libs: [
@@ -93,14 +103,19 @@ cc_benchmark {
 
 cc_benchmark {
     name: "bluetooth_benchmark_timer_performance",
-    defaults: ["fluoride_defaults"],
+    defaults: [
+        "fluoride_defaults",
+    ],
+    host_supported: false,
     include_dirs: ["system/bt"],
     srcs: [
         "benchmark/timer_performance_benchmark.cc",
     ],
     shared_libs: [
         "liblog",
+        "libcrypto",
         "libprotobuf-cpp-lite",
+        "libcrypto",
         "libcutils",
     ],
     static_libs: [

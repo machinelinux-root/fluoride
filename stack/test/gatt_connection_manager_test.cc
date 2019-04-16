@@ -26,6 +26,7 @@ class WhiteListMock {
   MOCK_METHOD0(WhiteListClear, void());
   MOCK_METHOD0(SetLeConnectionModeToFast, bool());
   MOCK_METHOD0(SetLeConnectionModeToSlow, void());
+  MOCK_METHOD2(OnConnectionTimedOut, void(uint8_t, const RawAddress&));
 };
 
 std::unique_ptr<WhiteListMock> localWhiteListMock;
@@ -60,16 +61,20 @@ void BTM_SetLeConnectionModeToSlow() {
 
 namespace connection_manager {
 class BleConnectionManager : public testing::Test {
-  virtual void SetUp() {
+  void SetUp() override {
     localWhiteListMock = std::make_unique<WhiteListMock>();
   }
 
-  virtual void TearDown() {
+  void TearDown() override {
     connection_manager::reset(true);
     AlarmMock::Reset();
     localWhiteListMock.reset();
   }
 };
+
+void on_connection_timed_out(uint8_t app_id, const RawAddress& address) {
+  localWhiteListMock->OnConnectionTimedOut(app_id, address);
+}
 
 /** Verify that app can add a device to white list, it is returned as interested
  * app, and then can remove the device later. */
@@ -183,6 +188,7 @@ TEST_F(BleConnectionManager, test_direct_connect_timeout) {
 
   EXPECT_CALL(*localWhiteListMock, SetLeConnectionModeToSlow()).Times(1);
   EXPECT_CALL(*localWhiteListMock, WhiteListRemove(_)).Times(1);
+  EXPECT_CALL(*localWhiteListMock, OnConnectionTimedOut(CLIENT1, address1)).Times(1);
   EXPECT_CALL(*AlarmMock::Get(), AlarmFree(_)).Times(1);
 
   // simulate timeout seconds passed, alarm executing

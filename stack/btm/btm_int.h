@@ -48,6 +48,7 @@ extern tBTM_CB btm_cb;
  *******************************************
 */
 extern void btm_init(void);
+extern void btm_free(void);
 
 /* Internal functions provided by btm_inq.cc
  ******************************************
@@ -201,7 +202,7 @@ extern bool btm_dev_support_switch(const RawAddress& bd_addr);
 
 extern tBTM_SEC_DEV_REC* btm_sec_allocate_dev_rec(void);
 extern tBTM_SEC_DEV_REC* btm_sec_alloc_dev(const RawAddress& bd_addr);
-extern void btm_sec_free_dev(tBTM_SEC_DEV_REC* p_dev_rec);
+extern void wipe_secrets_and_remove(tBTM_SEC_DEV_REC* p_dev_rec);
 extern tBTM_SEC_DEV_REC* btm_find_dev(const RawAddress& bd_addr);
 extern tBTM_SEC_DEV_REC* btm_find_or_alloc_dev(const RawAddress& bd_addr);
 extern tBTM_SEC_DEV_REC* btm_find_dev_by_handle(uint16_t handle);

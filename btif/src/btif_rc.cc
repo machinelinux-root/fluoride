@@ -1365,8 +1365,6 @@ static uint8_t opcode_from_pdu(uint8_t pdu) {
 static uint8_t fill_attribute_id_array(
     uint8_t cmd_attribute_number, btrc_media_attr_t* cmd_attribute_id_array,
     size_t out_array_size, btrc_media_attr_t* out_attribute_id_array) {
-  /* Reset attribute array */
-  memset(out_attribute_id_array, 0, out_array_size);
   /* Default case for cmd_attribute_number == 0xFF, No attribute */
   uint8_t out_attribute_number = 0;
   if (cmd_attribute_number == 0) {
@@ -1438,7 +1436,7 @@ static void btif_rc_upstreams_evt(uint16_t event, tAVRC_COMMAND* pavrc_cmd,
                            AVRC_STS_BAD_CMD, pavrc_cmd->cmd.opcode);
     } break;
     case AVRC_PDU_GET_ELEMENT_ATTR: {
-      btrc_media_attr_t element_attrs[BTRC_MAX_ELEM_ATTR_SIZE];
+      btrc_media_attr_t element_attrs[BTRC_MAX_ELEM_ATTR_SIZE] = {};
       uint8_t num_attr = fill_attribute_id_array(
           pavrc_cmd->get_elem_attrs.num_attr,
           (btrc_media_attr_t*)pavrc_cmd->get_elem_attrs.attrs,
@@ -1485,7 +1483,7 @@ static void btif_rc_upstreams_evt(uint16_t event, tAVRC_COMMAND* pavrc_cmd,
     } break;
 
     case AVRC_PDU_GET_FOLDER_ITEMS: {
-      uint32_t attr_ids[BTRC_MAX_ELEM_ATTR_SIZE];
+      uint32_t attr_ids[BTRC_MAX_ELEM_ATTR_SIZE] = {0};
       uint8_t num_attr;
       num_attr = pavrc_cmd->get_items.attr_count;
 
@@ -1576,7 +1574,7 @@ static void btif_rc_upstreams_evt(uint16_t event, tAVRC_COMMAND* pavrc_cmd,
     } break;
 
     case AVRC_PDU_GET_ITEM_ATTRIBUTES: {
-      btrc_media_attr_t item_attrs[BTRC_MAX_ELEM_ATTR_SIZE];
+      btrc_media_attr_t item_attrs[BTRC_MAX_ELEM_ATTR_SIZE] = {};
       uint8_t num_attr = fill_attribute_id_array(
           pavrc_cmd->get_attrs.attr_count,
           (btrc_media_attr_t*)pavrc_cmd->get_attrs.p_attr_list,
@@ -2045,7 +2043,7 @@ static bt_status_t get_folder_items_list_rsp(const RawAddress& bd_addr,
         } break;
 
         case AVRC_ITEM_MEDIA: {
-          tAVRC_ATTR_ENTRY attr_vals[BTRC_MAX_ELEM_ATTR_SIZE];
+          tAVRC_ATTR_ENTRY attr_vals[BTRC_MAX_ELEM_ATTR_SIZE] = {};
 
           memcpy(item.u.media.uid, cur_item->media.uid, sizeof(tAVRC_UID));
           item.u.media.type = cur_item->media.type;
@@ -2940,9 +2938,12 @@ static void register_for_event_notification(btif_rc_supported_event_t* p_event,
     BTIF_TRACE_ERROR("%s: no more transaction labels: %d", __func__, status);
     return;
   }
-
-  status = register_notification_cmd(p_transaction->lbl, p_event->event_id, 0,
-                                     p_dev);
+  // interval is only valid for AVRC_EVT_PLAY_POS_CHANGED
+  uint32_t interval = 0;
+  if (p_event->event_id == AVRC_EVT_PLAY_POS_CHANGED) {
+    interval = 2000;
+  }
+  status = register_notification_cmd(p_transaction->lbl, p_event->event_id, interval, p_dev);
   if (status != BT_STATUS_SUCCESS) {
     BTIF_TRACE_ERROR("%s: Error in Notification registration: %d", __func__,
                      status);
@@ -3050,6 +3051,7 @@ static void handle_get_capability_response(tBTA_AV_META_MSG* pmeta_msg,
       /* Skip registering for Play position change notification */
       if ((p_rsp->param.event_id[xx] == AVRC_EVT_PLAY_STATUS_CHANGE) ||
           (p_rsp->param.event_id[xx] == AVRC_EVT_TRACK_CHANGE) ||
+          (p_rsp->param.event_id[xx] == AVRC_EVT_PLAY_POS_CHANGED) ||
           (p_rsp->param.event_id[xx] == AVRC_EVT_APP_SETTING_CHANGE) ||
           (p_rsp->param.event_id[xx] == AVRC_EVT_NOW_PLAYING_CHANGE) ||
           (p_rsp->param.event_id[xx] == AVRC_EVT_ADDR_PLAYER_CHANGE) ||
@@ -3178,12 +3180,16 @@ static void handle_notification_response(tBTA_AV_META_MSG* pmeta_msg,
                        p_dev->rc_addr, p_rsp->param.addr_player.player_id));
         break;
 
+      case AVRC_EVT_PLAY_POS_CHANGED:
+        do_in_jni_thread(FROM_HERE, base::Bind(bt_rc_ctrl_callbacks->play_position_changed_cb, p_dev->rc_addr, 0,
+                                               p_rsp->param.play_pos));
+
+        break;
       case AVRC_EVT_UIDS_CHANGE:
         break;
 
       case AVRC_EVT_TRACK_REACHED_END:
       case AVRC_EVT_TRACK_REACHED_START:
-      case AVRC_EVT_PLAY_POS_CHANGED:
       case AVRC_EVT_BATTERY_STATUS_CHANGE:
       case AVRC_EVT_SYSTEM_STATUS_CHANGE:
       default:
@@ -3290,12 +3296,15 @@ static void handle_notification_response(tBTA_AV_META_MSG* pmeta_msg,
       case AVRC_EVT_ADDR_PLAYER_CHANGE:
         break;
 
+      case AVRC_EVT_PLAY_POS_CHANGED:
+        // handle on interim
+        break;
+
       case AVRC_EVT_UIDS_CHANGE:
         break;
 
       case AVRC_EVT_TRACK_REACHED_END:
       case AVRC_EVT_TRACK_REACHED_START:
-      case AVRC_EVT_PLAY_POS_CHANGED:
       case AVRC_EVT_BATTERY_STATUS_CHANGE:
       case AVRC_EVT_SYSTEM_STATUS_CHANGE:
       default:

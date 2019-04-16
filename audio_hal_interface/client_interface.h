@@ -26,8 +26,7 @@
 
 #include "common/message_loop_thread.h"
 
-#define BLUETOOTH_AUDIO_PROP_ENABLED \
-  "persist.bluetooth.bluetooth_audio_hal.enabled"
+#define BLUETOOTH_AUDIO_HAL_PROP_DISABLED "persist.bluetooth.bluetooth_audio_hal.disabled"
 
 namespace bluetooth {
 namespace audio {
@@ -36,6 +35,8 @@ using ::android::hardware::bluetooth::audio::V2_0::AudioCapabilities;
 using ::android::hardware::bluetooth::audio::V2_0::AudioConfiguration;
 using ::android::hardware::bluetooth::audio::V2_0::BitsPerSample;
 using ::android::hardware::bluetooth::audio::V2_0::ChannelMode;
+using ::android::hardware::bluetooth::audio::V2_0::CodecConfiguration;
+using ::android::hardware::bluetooth::audio::V2_0::CodecType;
 using ::android::hardware::bluetooth::audio::V2_0::IBluetoothAudioProvider;
 using ::android::hardware::bluetooth::audio::V2_0::PcmParameters;
 using ::android::hardware::bluetooth::audio::V2_0::SampleRate;
@@ -129,6 +130,10 @@ class BluetoothAudioClientInterface {
       bluetooth::common::MessageLoopThread* message_loop);
 
   ~BluetoothAudioClientInterface();
+
+  bool IsValid() const {
+    return provider_ != nullptr;
+  }
 
   std::vector<AudioCapabilities> GetAudioCapabilities() const;
 

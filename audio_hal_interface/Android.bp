@@ -6,11 +6,12 @@ cc_library_static {
     include_dirs: [
         "system/bt",
         "system/bt/bta/include",
+        "system/bt/bta/sys",
         "system/bt/btif/include",
         "system/bt/stack/include",
     ],
     srcs: [
-        "a2dp_software_encoding.cc",
+        "a2dp_encoding.cc",
         "client_interface.cc",
         "hearing_aid_software_encoding.cc",
     ],
@@ -45,6 +46,7 @@ cc_test {
         "libcutils",
         "libfmq",
         "libhidlbase",
+        "libhidltransport",
         "liblog",
         "libutils",
     ],

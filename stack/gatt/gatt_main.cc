@@ -196,21 +196,38 @@ void gatt_free(void) {
 bool gatt_connect(const RawAddress& rem_bda, tGATT_TCB* p_tcb,
                   tBT_TRANSPORT transport, uint8_t initiating_phys,
                   tGATT_IF gatt_if) {
-  bool gatt_ret = false;
-
   if (gatt_get_ch_state(p_tcb) != GATT_CH_OPEN)
     gatt_set_ch_state(p_tcb, GATT_CH_CONN);
 
-  if (transport == BT_TRANSPORT_LE) {
-    p_tcb->att_lcid = L2CAP_ATT_CID;
-
-    gatt_ret = connection_manager::direct_connect_add(gatt_if, rem_bda);
-  } else {
+  if (transport != BT_TRANSPORT_LE) {
     p_tcb->att_lcid = L2CA_ConnectReq(BT_PSM_ATT, rem_bda);
-    if (p_tcb->att_lcid != 0) gatt_ret = true;
+    return p_tcb->att_lcid != 0;
   }
 
-  return gatt_ret;
+  // Already connected, send the callback, mark the link as used
+  if (gatt_get_ch_state(p_tcb) == GATT_CH_OPEN) {
+    /*  very similar to gatt_send_conn_cback, but no good way to reuse the code
+     */
+
+    /* notifying application about the connection up event */
+    for (int i = 0; i < GATT_MAX_APPS; i++) {
+      tGATT_REG* p_reg = &gatt_cb.cl_rcb[i];
+
+      if (!p_reg->in_use || p_reg->gatt_if != gatt_if) continue;
+
+      gatt_update_app_use_link_flag(p_reg->gatt_if, p_tcb, true, true);
+      if (p_reg->app_cb.p_conn_cb) {
+        uint16_t conn_id = GATT_CREATE_CONN_ID(p_tcb->tcb_idx, p_reg->gatt_if);
+        (*p_reg->app_cb.p_conn_cb)(p_reg->gatt_if, p_tcb->peer_bda, conn_id,
+                                   true, 0, p_tcb->transport);
+      }
+    }
+
+    return true;
+  }
+
+  p_tcb->att_lcid = L2CAP_ATT_CID;
+  return connection_manager::direct_connect_add(gatt_if, rem_bda);
 }
 
 /*******************************************************************************
@@ -242,8 +259,9 @@ bool gatt_disconnect(tGATT_TCB* p_tcb) {
       /* only LCB exist between remote device and local */
       ret = L2CA_RemoveFixedChnl(L2CAP_ATT_CID, p_tcb->peer_bda);
     } else {
-      ret = L2CA_CancelBleConnectReq(p_tcb->peer_bda);
-      if (!ret) gatt_set_ch_state(p_tcb, GATT_CH_CLOSE);
+      L2CA_CancelBleConnectReq(p_tcb->peer_bda);
+      gatt_cleanup_upon_disc(p_tcb->peer_bda, HCI_ERR_CONN_CAUSE_LOCAL_HOST, p_tcb->transport);
+      return true;
     }
     gatt_set_ch_state(p_tcb, GATT_CH_CLOSING);
   } else {
@@ -356,6 +374,7 @@ bool gatt_act_connect(tGATT_REG* p_reg, const RawAddress& bd_addr,
                         p_reg->gatt_if))
         return false;
     } else if (st == GATT_CH_CLOSING) {
+      LOG(INFO) << "Must finish disconnection before new connection";
       /* need to complete the closing first */
       return false;
     }
@@ -379,6 +398,12 @@ bool gatt_act_connect(tGATT_REG* p_reg, const RawAddress& bd_addr,
 
   return true;
 }
+
+namespace connection_manager {
+void on_connection_timed_out(uint8_t app_id, const RawAddress& address) {
+  gatt_le_connect_cback(L2CAP_ATT_CID, address, false, 0xff, BT_TRANSPORT_LE);
+}
+}  // namespace connection_manager
 
 /** This callback function is called by L2CAP to indicate that the ATT fixed
  * channel for LE is connected (conn = true)/disconnected (conn = false).
