@@ -177,6 +177,11 @@ struct HearingDevice {
         audio_status_ccc_handle(0),
         service_changed_ccc_handle(0),
         read_psm_handle(0),
+        capabilities(0),
+        hi_sync_id(0),
+        render_delay(0),
+        preparation_delay(0),
+        codecs(0),
         playback_started(false),
         command_acked(false),
         read_rssi_count(0) {}
@@ -206,6 +211,7 @@ class HearingAid {
 
   virtual void Connect(const RawAddress& address) = 0;
   virtual void Disconnect(const RawAddress& address) = 0;
+  virtual void AddToWhiteList(const RawAddress& address) = 0;
   virtual void SetVolume(int8_t volume) = 0;
 };
 
@@ -235,7 +241,8 @@ struct CodecConfiguration {
 class HearingAidAudioSource {
  public:
   static void Start(const CodecConfiguration& codecConfiguration,
-                    HearingAidAudioReceiver* audioReceiver);
+                    HearingAidAudioReceiver* audioReceiver,
+                    uint16_t remote_delay_ms);
   static void Stop();
   static void Initialize();
   static void CleanUp();
