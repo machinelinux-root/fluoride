@@ -49,15 +49,20 @@ string_literal \".*\"
 "//"[^\r\n]*            { /* do nothing */ }
 
   /* Begin reserved keyword definitions */
+  /* Fields */
+"_body_"                { return(token::BODY); }
+"_payload_"             { return(token::PAYLOAD); }
+"_size_"                { return(token::SIZE); }
+"_count_"               { return(token::COUNT); }
+"_fixed_"               { return(token::FIXED); }
+"_reserved_"            { return(token::RESERVED); }
+"_checksum_start_"      { return(token::CHECKSUM_START); }
+  /* Types */
+"checksum"              { return(token::CHECKSUM); }
+"custom_field"          { return(token::CUSTOM_FIELD); }
 "enum"                  { return(token::ENUM); }
-"packet"                { return(token::PACKET); }
-"body"                  { return(token::BODY); }
-"payload"               { return(token::PAYLOAD); }
-"size"                  { return(token::SIZE); }
-"count"                 { return(token::COUNT); }
-"fixed"                 { return(token::FIXED); }
-"reserved"              { return(token::RESERVED); }
 "group"                 { return(token::GROUP); }
+"packet"                { return(token::PACKET); }
 "little_endian_packets" {
                           yylval->integer = 1;
                           return token::IS_LITTLE_ENDIAN;
@@ -69,7 +74,8 @@ string_literal \".*\"
 
   /* Begin identifier definitions */
 {string_literal}        {
-                          yylval->string = new std::string(yytext);
+                          std::string with_quotes = std::string(yytext);
+                          yylval->string = new std::string(with_quotes.begin() + 1, with_quotes.end() - 1);
                           return token::STRING;
                         }
 

@@ -17,12 +17,15 @@
 #include "hal/hci_hal_host_rootcanal.h"
 #include "hal/hci_hal.h"
 
-#include <fcntl.h>
 #include <netdb.h>
+#include <sys/socket.h>
+#include <sys/types.h>
 #include <unistd.h>
+#include <csignal>
 #include <mutex>
 #include <queue>
 
+#include "hal/snoop_logger.h"
 #include "os/log.h"
 #include "os/reactor.h"
 #include "os/thread.h"
@@ -67,8 +70,11 @@ int ConnectToRootCanal(const std::string& server, int port) {
     return INVALID_FD;
   }
 
-  int flags = fcntl(socket_fd, F_GETFL, NULL);
-  int ret = fcntl(socket_fd, F_SETFL, flags | O_NONBLOCK);
+  timeval socket_timeout{
+      .tv_sec = 3,
+      .tv_usec = 0,
+  };
+  int ret = setsockopt(socket_fd, SOL_SOCKET, SO_RCVTIMEO, &socket_timeout, sizeof(socket_timeout));
   if (ret == -1) {
     LOG_ERROR("can't control socket fd: %s", strerror(errno));
     return INVALID_FD;
@@ -80,20 +86,11 @@ int ConnectToRootCanal(const std::string& server, int port) {
 namespace bluetooth {
 namespace hal {
 
-class BluetoothHciHalHostRootcanal : public BluetoothHciHal {
- public:
-  void initialize(BluetoothInitializationCompleteCallback* callback) override {
-    std::lock_guard<std::mutex> lock(mutex_);
-    ASSERT(sock_fd_ == INVALID_FD && callback != nullptr);
-    sock_fd_ = ConnectToRootCanal(config_->GetServerAddress(), config_->GetPort());
-    ASSERT(sock_fd_ != INVALID_FD);
-    reactable_ =
-        hci_incoming_thread_.GetReactor()->Register(sock_fd_, [this]() { this->incoming_packet_received(); }, nullptr);
-    callback->initializationComplete(Status::SUCCESS);
-    LOG_INFO("Rootcanal HAL opened successfully");
-  }
+const std::string SnoopLogger::DefaultFilePath = "/tmp/btsnoop_hci.log";
 
-  void registerIncomingPacketCallback(BluetoothHciHalCallbacks* callback) override {
+class HciHalHostRootcanal : public HciHal {
+ public:
+  void registerIncomingPacketCallback(HciHalCallbacks* callback) override {
     std::lock_guard<std::mutex> lock(mutex_);
     ASSERT(incoming_packet_callback_ == nullptr && callback != nullptr);
     incoming_packet_callback_ = callback;
@@ -103,6 +100,7 @@ class BluetoothHciHalHostRootcanal : public BluetoothHciHal {
     std::lock_guard<std::mutex> lock(mutex_);
     ASSERT(sock_fd_ != INVALID_FD);
     std::vector<uint8_t> packet = std::move(command);
+    btsnoop_logger_->capture(packet, SnoopLogger::Direction::OUTGOING, SnoopLogger::PacketType::CMD);
     packet.insert(packet.cbegin(), kH4Command);
     write_to_rootcanal_fd(packet);
   }
@@ -111,6 +109,7 @@ class BluetoothHciHalHostRootcanal : public BluetoothHciHal {
     std::lock_guard<std::mutex> lock(mutex_);
     ASSERT(sock_fd_ != INVALID_FD);
     std::vector<uint8_t> packet = std::move(data);
+    btsnoop_logger_->capture(packet, SnoopLogger::Direction::OUTGOING, SnoopLogger::PacketType::ACL);
     packet.insert(packet.cbegin(), kH4Acl);
     write_to_rootcanal_fd(packet);
   }
@@ -119,11 +118,28 @@ class BluetoothHciHalHostRootcanal : public BluetoothHciHal {
     std::lock_guard<std::mutex> lock(mutex_);
     ASSERT(sock_fd_ != INVALID_FD);
     std::vector<uint8_t> packet = std::move(data);
+    btsnoop_logger_->capture(packet, SnoopLogger::Direction::OUTGOING, SnoopLogger::PacketType::SCO);
     packet.insert(packet.cbegin(), kH4Sco);
     write_to_rootcanal_fd(packet);
   }
 
-  void close() override {
+ protected:
+  void ListDependencies(ModuleList* list) override {
+    list->add<SnoopLogger>();
+  }
+
+  void Start() override {
+    std::lock_guard<std::mutex> lock(mutex_);
+    ASSERT(sock_fd_ == INVALID_FD);
+    sock_fd_ = ConnectToRootCanal(config_->GetServerAddress(), config_->GetPort());
+    ASSERT(sock_fd_ != INVALID_FD);
+    reactable_ =
+        hci_incoming_thread_.GetReactor()->Register(sock_fd_, [this]() { this->incoming_packet_received(); }, nullptr);
+    btsnoop_logger_ = GetDependency<SnoopLogger>();
+    LOG_INFO("Rootcanal HAL opened successfully");
+  }
+
+  void Stop() override {
     std::lock_guard<std::mutex> lock(mutex_);
     if (reactable_ != nullptr) {
       hci_incoming_thread_.GetReactor()->Unregister(reactable_);
@@ -139,12 +155,13 @@ class BluetoothHciHalHostRootcanal : public BluetoothHciHal {
  private:
   std::mutex mutex_;
   HciHalHostRootcanalConfig* config_ = HciHalHostRootcanalConfig::Get();
-  BluetoothHciHalCallbacks* incoming_packet_callback_ = nullptr;
+  HciHalCallbacks* incoming_packet_callback_ = nullptr;
   int sock_fd_ = INVALID_FD;
   bluetooth::os::Thread hci_incoming_thread_ =
       bluetooth::os::Thread("hci_incoming_thread", bluetooth::os::Thread::Priority::NORMAL);
   bluetooth::os::Reactor::Reactable* reactable_ = nullptr;
   std::queue<std::vector<uint8_t>> hci_outgoing_queue_;
+  SnoopLogger* btsnoop_logger_;
 
   void write_to_rootcanal_fd(HciPacket packet) {
     // TODO: replace this with new queue when it's ready
@@ -177,72 +194,76 @@ class BluetoothHciHalHostRootcanal : public BluetoothHciHal {
     RUN_NO_INTR(received_size = recv(sock_fd_, buf, kH4HeaderSize, 0));
     ASSERT_LOG(received_size != -1, "Can't receive from socket: %s", strerror(errno));
     if (received_size == 0) {
-      LOG_WARN("Can't read H4 header. Closing this Rootcanal HAL.");
-      close();
+      LOG_WARN("Can't read H4 header.");
+      raise(SIGINT);
       return;
     }
 
     if (buf[0] == kH4Event) {
       RUN_NO_INTR(received_size = recv(sock_fd_, buf + kH4HeaderSize, kHciEvtHeaderSize, 0));
+      ASSERT_LOG(received_size != -1, "Can't receive from socket: %s", strerror(errno));
       ASSERT_LOG(received_size == kHciEvtHeaderSize, "malformed HCI event header received");
 
       uint8_t hci_evt_parameter_total_length = buf[2];
       ssize_t payload_size;
       RUN_NO_INTR(payload_size =
                       recv(sock_fd_, buf + kH4HeaderSize + kHciEvtHeaderSize, hci_evt_parameter_total_length, 0));
+      ASSERT_LOG(payload_size != -1, "Can't receive from socket: %s", strerror(errno));
       ASSERT_LOG(payload_size == hci_evt_parameter_total_length,
                  "malformed HCI event total parameter size received: %zu != %d", payload_size,
                  hci_evt_parameter_total_length);
 
       HciPacket receivedHciPacket;
       receivedHciPacket.assign(buf + kH4HeaderSize, buf + kH4HeaderSize + kHciEvtHeaderSize + payload_size);
+      btsnoop_logger_->capture(receivedHciPacket, SnoopLogger::Direction::INCOMING,
+                               SnoopLogger::PacketType::EVT);
       incoming_packet_callback_->hciEventReceived(receivedHciPacket);
     }
 
     if (buf[0] == kH4Acl) {
-      received_size = recv(sock_fd_, buf + kH4HeaderSize, kHciAclHeaderSize, 0);
+      RUN_NO_INTR(received_size = recv(sock_fd_, buf + kH4HeaderSize, kHciAclHeaderSize, 0));
+      ASSERT_LOG(received_size != -1, "Can't receive from socket: %s", strerror(errno));
       ASSERT_LOG(received_size == kHciAclHeaderSize, "malformed ACL header received");
 
       uint16_t hci_acl_data_total_length = buf[4] * 256 + buf[3];
       int payload_size;
       RUN_NO_INTR(payload_size = recv(sock_fd_, buf + kH4HeaderSize + kHciAclHeaderSize, hci_acl_data_total_length, 0));
+      ASSERT_LOG(payload_size != -1, "Can't receive from socket: %s", strerror(errno));
       ASSERT_LOG(payload_size == hci_acl_data_total_length, "malformed ACL length received: %d != %d", payload_size,
                  hci_acl_data_total_length);
       ASSERT_LOG(hci_acl_data_total_length <= kBufSize - kH4HeaderSize - kHciAclHeaderSize, "packet too long");
 
       HciPacket receivedHciPacket;
       receivedHciPacket.assign(buf + kH4HeaderSize, buf + kH4HeaderSize + kHciAclHeaderSize + payload_size);
+      btsnoop_logger_->capture(receivedHciPacket, SnoopLogger::Direction::INCOMING,
+                               SnoopLogger::PacketType::ACL);
       incoming_packet_callback_->aclDataReceived(receivedHciPacket);
     }
 
     if (buf[0] == kH4Sco) {
-      received_size = recv(sock_fd_, buf + kH4HeaderSize, kHciScoHeaderSize, 0);
+      RUN_NO_INTR(received_size = recv(sock_fd_, buf + kH4HeaderSize, kHciScoHeaderSize, 0));
+      ASSERT_LOG(received_size != -1, "Can't receive from socket: %s", strerror(errno));
       ASSERT_LOG(received_size == kHciScoHeaderSize, "malformed SCO header received");
 
       uint8_t hci_sco_data_total_length = buf[3];
-      int payload_size = recv(sock_fd_, buf + kH4HeaderSize + kHciScoHeaderSize, hci_sco_data_total_length, 0);
+      int payload_size;
+      RUN_NO_INTR(payload_size = recv(sock_fd_, buf + kH4HeaderSize + kHciScoHeaderSize, hci_sco_data_total_length, 0));
+      ASSERT_LOG(payload_size != -1, "Can't receive from socket: %s", strerror(errno));
       ASSERT_LOG(payload_size == hci_sco_data_total_length, "malformed SCO packet received: size mismatch");
 
       HciPacket receivedHciPacket;
       receivedHciPacket.assign(buf + kH4HeaderSize, buf + kH4HeaderSize + kHciScoHeaderSize + payload_size);
+      btsnoop_logger_->capture(receivedHciPacket, SnoopLogger::Direction::INCOMING,
+                               SnoopLogger::PacketType::SCO);
       incoming_packet_callback_->scoDataReceived(receivedHciPacket);
     }
     memset(buf, 0, kBufSize);
   }
 };
 
-namespace {
-BluetoothHciHalHostRootcanal* instance = new BluetoothHciHalHostRootcanal;
-}
-
-BluetoothHciHal* GetBluetoothHciHal() {
-  return instance;
-}
-
-void ResetRootcanalHal() {
-  delete instance;
-  instance = new BluetoothHciHalHostRootcanal;
-}
+const ModuleFactory HciHal::Factory = ModuleFactory([]() {
+  return new HciHalHostRootcanal();
+});
 
 }  // namespace hal
 }  // namespace bluetooth

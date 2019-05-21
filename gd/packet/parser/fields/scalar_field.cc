@@ -33,7 +33,7 @@ std::string ScalarField::GetType() const {
 
 void ScalarField::GenGetter(std::ostream& s, Size start_offset, Size end_offset) const {
   s << GetType();
-  s << " Get" << GetName() << "() const {";
+  s << " Get" << util::UnderscoreToCamelCase(GetName()) << "() const {";
   s << "ASSERT(was_validated_);";
 
   // Write the Getter Function Body
@@ -102,7 +102,7 @@ bool ScalarField::GenBuilderParameter(std::ostream& s) const {
     ERROR(this) << "Not implemented";
   }
   std::string param_type = util::GetTypeForSize(size_);
-  s << param_type << " " << util::CamelCaseToUnderScore(GetName());
+  s << param_type << " " << GetName();
   return true;
 }
 
@@ -116,12 +116,18 @@ void ScalarField::GenParameterValidator(std::ostream& s) const {
   if (util::RoundSizeUp(bits) == bits) {
     return;
   }
-  s << "ASSERT(" << util::CamelCaseToUnderScore(GetName()) << " < "
+  s << "ASSERT(" << GetName() << " < "
     << "(static_cast<uint64_t>(1) << " << bits << "));";
 }
 
 void ScalarField::GenInserter(std::ostream& s) const {
-  s << "insert(" << util::CamelCaseToUnderScore(GetName()) << "_, i," << GetSize().bits() << ");";
+  if (GetSize().bits() == 8) {
+    s << "i.insert_byte(" << GetName() << "_);";
+  } else if (GetSize().bits() % 8 == 0) {
+    s << "insert(" << GetName() << "_, i);";
+  } else {
+    s << "insert(" << GetName() << "_, i," << GetSize().bits() << ");";
+  }
 }
 
 void ScalarField::GenValidator(std::ostream&) const {
