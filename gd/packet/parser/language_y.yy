@@ -83,6 +83,7 @@
 %type<packet_field_type> body_field_definition;
 %type<packet_field_type> fixed_field_definition;
 %type<packet_field_type> reserved_field_definition;
+%type<packet_field_type> array_field_definition;
 
 %type<constraint_list_t> constraint_list;
 %type<constraint_t> constraint;
@@ -191,6 +192,12 @@ custom_field_definition
       decls->AddTypeDef(*$2, new CustomFieldDef(*$2, *$5, $4));
       delete $2;
       delete $5;
+    }
+  | CUSTOM_FIELD IDENTIFIER STRING
+    {
+      decls->AddTypeDef(*$2, new CustomFieldDef(*$2, *$3));
+      delete $2;
+      delete $3;
     }
 
 packet_definition
@@ -351,6 +358,11 @@ field_definition
   | reserved_field_definition
     {
       std::cerr << "Reserved field\n";
+      $$ = $1;
+    }
+  | array_field_definition
+    {
+      std::cerr << "ARRAY field\n";
       $$ = $1;
     }
 
@@ -551,6 +563,65 @@ reserved_field_definition
     {
       std::cerr << "Reserved field of size=" << $3 << "\n";
       $$ = new ReservedField($3, LOC);
+    }
+
+array_field_definition
+  : IDENTIFIER ':' INTEGER '[' ']'
+    {
+      DEBUG() << "Array field defined name=" << *$1 << " element_size=" << $3;
+      $$ = new ArrayField(*$1, $3, "", LOC);
+      delete $1;
+    }
+  | IDENTIFIER ':' INTEGER '[' SIZE_MODIFIER ']'
+    {
+      DEBUG() << "Array field defined name=" << *$1 << " element_size=" << $3
+             << " size_modifier=" << *$5;
+      $$ = new ArrayField(*$1, $3, *$5, LOC);
+      delete $1;
+      delete $5;
+    }
+  | IDENTIFIER ':' INTEGER '[' INTEGER ']'
+    {
+      DEBUG() << "Array field defined name=" << *$1 << " element_size=" << $3
+             << " fixed_size=" << $5;
+      $$ = new ArrayField(*$1, $3, $5, LOC);
+      delete $1;
+    }
+  | IDENTIFIER ':' IDENTIFIER '[' ']'
+    {
+      DEBUG() << "Array field defined name=" << *$1 << " type=" << *$3;
+      if (auto type_def = decls->GetTypeDef(*$3)) {
+        $$ = new ArrayField(*$1, type_def, "", LOC);
+      } else {
+        ERRORLOC(LOC) << "Can't find type used in array field.";
+      }
+      delete $1;
+      delete $3;
+    }
+  | IDENTIFIER ':' IDENTIFIER '[' SIZE_MODIFIER ']'
+    {
+      DEBUG() << "Array field defined name=" << *$1 << " type=" << *$3
+             << " size_modifier=" << *$5;
+      if (auto type_def = decls->GetTypeDef(*$3)) {
+        $$ = new ArrayField(*$1, type_def, *$5, LOC);
+      } else {
+        ERRORLOC(LOC) << "Can't find type used in array field.";
+      }
+      delete $1;
+      delete $3;
+      delete $5;
+    }
+  | IDENTIFIER ':' IDENTIFIER '[' INTEGER ']'
+    {
+      DEBUG() << "Array field defined name=" << *$1 << " type=" << *$3
+             << " fixed_size=" << $5;
+      if (auto type_def = decls->GetTypeDef(*$3)) {
+        $$ = new ArrayField(*$1, type_def, $5, LOC);
+      } else {
+        ERRORLOC(LOC) << "Can't find type used in array field.";
+      }
+      delete $1;
+      delete $3;
     }
 
 %%

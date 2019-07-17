@@ -41,6 +41,7 @@ class PacketField : public Loggable {
     COUNT,
     BODY,
     PAYLOAD,
+    ARRAY,
     CUSTOM,
     CHECKSUM,
     CHECKSUM_START,
@@ -52,6 +53,10 @@ class PacketField : public Loggable {
   // Returns the size of the field in bits and a string that evaluates into
   // bytes for dynamically sized arrays.
   virtual Size GetSize() const = 0;
+
+  // Returns the size of the field in bits given the information in the builder.
+  // For most field types, this will be the same as GetSize();
+  virtual Size GetBuilderSize() const;
 
   // Get the type of the field to be used in the builders constructor and
   // variables.

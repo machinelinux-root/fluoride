@@ -1,6 +1,7 @@
 little_endian_packets
 
 custom_field SixBytes : 48 "packet/parser/test/"
+custom_field Variable "packet/parser/test/"
 
 packet Parent {
   _fixed_ = 0x12 : 8,
@@ -86,4 +87,64 @@ packet FieldsEndWithNumbers {
   field_2 : 16,
   field_10 : 16,
   field_11 : 16,
+}
+
+enum ForArrays : 16 {
+  ONE = 0x0001,
+  TWO = 0x0002,
+  ONE_TWO = 0x0201,
+  TWO_THREE = 0x0302,
+  FFFF = 0xffff,
+}
+
+packet FixedArrayEnum {
+  enum_array : ForArrays[5],
+}
+
+packet SizedArrayEnum {
+  _size_(enum_array) : 16,
+  enum_array : ForArrays[],
+}
+
+packet CountArrayEnum {
+  _count_(enum_array) : 8,
+  enum_array : ForArrays[],
+}
+
+packet SizedArrayCustom {
+  _size_(six_bytes_array) : 8,
+  an_extra_byte : 8,
+  six_bytes_array : SixBytes[+1],
+}
+
+packet FixedArrayCustom {
+  six_bytes_array : SixBytes[5],
+}
+
+packet CountArrayCustom {
+  _count_(six_bytes_array) : 8,
+  six_bytes_array : SixBytes[],
+}
+
+packet PacketWithFixedArraysOfBytes {
+  fixed_256bit_in_bytes : 8[32],
+  fixed_256bit_in_words : 32[8],
+}
+
+packet OneVariable {
+  one : Variable,
+}
+
+packet SizedArrayVariable {
+  _size_(variable_array) : 8,
+  variable_array : Variable[],
+}
+
+packet FixedArrayVariable {
+  variable_array : Variable[5],
+}
+
+packet CountArrayVariable {
+  _count_(variable_array) : 8,
+  variable_array : Variable[],
 }

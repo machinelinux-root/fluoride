@@ -391,6 +391,315 @@ TEST(GeneratedPacketTest, testChildSizeModifier) {
 
   ASSERT_EQ(more_bytes, child_view.GetMoreBytes());
 }
+
+namespace {
+vector<uint8_t> fixed_array_enum{
+    0x01,  // ONE
+    0x00,
+    0x02,  // TWO
+    0x00,
+    0x01,  // ONE_TWO
+    0x02,
+    0x02,  // TWO_THREE
+    0x03,
+    0xff,  // FFFF
+    0xff,
+};
+}
+
+TEST(GeneratedPacketTest, testFixedArrayEnum) {
+  std::vector<ForArrays> fixed_array{
+      {ForArrays::ONE, ForArrays::TWO, ForArrays::ONE_TWO, ForArrays::TWO_THREE, ForArrays::FFFF}};
+  auto packet = FixedArrayEnumBuilder::Create(fixed_array);
+  ASSERT_EQ(fixed_array_enum.size(), packet->size());
+
+  std::shared_ptr<std::vector<uint8_t>> packet_bytes = std::make_shared<std::vector<uint8_t>>();
+  BitInserter it(*packet_bytes);
+  packet->Serialize(it);
+
+  ASSERT_EQ(fixed_array_enum.size(), packet_bytes->size());
+  for (size_t i = 0; i < fixed_array_enum.size(); i++) {
+    ASSERT_EQ(fixed_array_enum[i], packet_bytes->at(i));
+  }
+
+  PacketView<kLittleEndian> packet_bytes_view(packet_bytes);
+  auto view = FixedArrayEnumView::Create(packet_bytes_view);
+  ASSERT_TRUE(view.IsValid());
+  auto array = view.GetEnumArray();
+  ASSERT_EQ(fixed_array.size(), array.size());
+  for (size_t i = 0; i < fixed_array.size(); i++) {
+    ASSERT_EQ(array[i], fixed_array[i]);
+  }
+}
+
+namespace {
+vector<uint8_t> sized_array_enum{
+    0x0a,  // _size_
+    0x00,
+    0x01,  // ONE
+    0x00,
+    0x02,  // TWO
+    0x00,
+    0x01,  // ONE_TWO
+    0x02,
+    0x02,  // TWO_THREE
+    0x03,
+    0xff,  // FFFF
+    0xff,
+};
+}
+
+TEST(GeneratedPacketTest, testSizedArrayEnum) {
+  std::vector<ForArrays> sized_array{
+      {ForArrays::ONE, ForArrays::TWO, ForArrays::ONE_TWO, ForArrays::TWO_THREE, ForArrays::FFFF}};
+  auto packet = SizedArrayEnumBuilder::Create(sized_array);
+  ASSERT_EQ(sized_array_enum.size(), packet->size());
+
+  std::shared_ptr<std::vector<uint8_t>> packet_bytes = std::make_shared<std::vector<uint8_t>>();
+  BitInserter it(*packet_bytes);
+  packet->Serialize(it);
+
+  ASSERT_EQ(sized_array_enum.size(), packet_bytes->size());
+  for (size_t i = 0; i < sized_array_enum.size(); i++) {
+    ASSERT_EQ(sized_array_enum[i], packet_bytes->at(i));
+  }
+
+  PacketView<kLittleEndian> packet_bytes_view(packet_bytes);
+  auto view = SizedArrayEnumView::Create(packet_bytes_view);
+  ASSERT_TRUE(view.IsValid());
+  auto array = view.GetEnumArray();
+  ASSERT_EQ(sized_array.size(), array.size());
+  for (size_t i = 0; i < sized_array.size(); i++) {
+    ASSERT_EQ(array[i], sized_array[i]);
+  }
+}
+
+namespace {
+vector<uint8_t> count_array_enum{
+    0x03,  // _count_
+    0x01,  // ONE
+    0x00,
+    0x02,  // TWO_THREE
+    0x03,
+    0xff,  // FFFF
+    0xff,
+};
+}
+
+TEST(GeneratedPacketTest, testCountArrayEnum) {
+  std::vector<ForArrays> count_array{{ForArrays::ONE, ForArrays::TWO_THREE, ForArrays::FFFF}};
+  auto packet = CountArrayEnumBuilder::Create(count_array);
+  ASSERT_EQ(count_array_enum.size(), packet->size());
+
+  std::shared_ptr<std::vector<uint8_t>> packet_bytes = std::make_shared<std::vector<uint8_t>>();
+  BitInserter it(*packet_bytes);
+  packet->Serialize(it);
+
+  ASSERT_EQ(count_array_enum.size(), packet_bytes->size());
+  for (size_t i = 0; i < count_array_enum.size(); i++) {
+    ASSERT_EQ(count_array_enum[i], packet_bytes->at(i));
+  }
+
+  PacketView<kLittleEndian> packet_bytes_view(packet_bytes);
+  auto view = CountArrayEnumView::Create(packet_bytes_view);
+  ASSERT_TRUE(view.IsValid());
+  auto array = view.GetEnumArray();
+  ASSERT_EQ(count_array.size(), array.size());
+  for (size_t i = 0; i < count_array.size(); i++) {
+    ASSERT_EQ(array[i], count_array[i]);
+  }
+}
+
+TEST(GeneratedPacketTest, testFixedSizeByteArray) {
+  constexpr int byte_array_size = 32;
+  std::vector<uint8_t> byte_array(byte_array_size);
+  for (uint8_t i = 0; i < byte_array_size; i++) byte_array[i] = i;
+
+  constexpr int word_array_size = 8;
+  std::vector<uint32_t> word_array(word_array_size);
+  for (uint32_t i = 0; i < word_array_size; i++) word_array[i] = i;
+
+  auto packet = PacketWithFixedArraysOfBytesBuilder::Create(byte_array, word_array);
+  ASSERT_EQ(2 * (256 / 8), packet->size());
+
+  std::shared_ptr<std::vector<uint8_t>> packet_bytes = std::make_shared<std::vector<uint8_t>>();
+  BitInserter it(*packet_bytes);
+  packet->Serialize(it);
+
+  ASSERT_EQ(byte_array_size + word_array_size * sizeof(uint32_t), packet_bytes->size());
+
+  for (size_t i = 0; i < byte_array_size; i++) {
+    ASSERT_EQ(byte_array[i], packet_bytes->at(i));
+  }
+
+  PacketView<kLittleEndian> packet_bytes_view(packet_bytes);
+  auto view = PacketWithFixedArraysOfBytesView::Create(packet_bytes_view);
+  ASSERT_TRUE(view.IsValid());
+  auto array = view.GetFixed256bitInBytes();
+  ASSERT_EQ(byte_array.size(), array.size());
+  for (size_t i = 0; i < array.size(); i++) {
+    ASSERT_EQ(array[i], byte_array[i]);
+  }
+
+  auto decoded_word_array = view.GetFixed256bitInWords();
+  ASSERT_EQ(word_array.size(), decoded_word_array.size());
+  for (size_t i = 0; i < decoded_word_array.size(); i++) {
+    ASSERT_EQ(word_array[i], decoded_word_array[i]);
+  }
+}
+
+TEST(GeneratedPacketTest, testFixedSizeArrayValidatorDeath) {
+  constexpr int byte_array_size = 33;
+  std::vector<uint8_t> byte_array(byte_array_size);
+  for (uint8_t i = 0; i < byte_array_size; i++) byte_array[i] = i;
+
+  constexpr int word_array_size = 8;
+  std::vector<uint32_t> word_array(word_array_size);
+  for (uint32_t i = 0; i < word_array_size; i++) word_array[i] = i;
+
+  std::unique_ptr<PacketWithFixedArraysOfBytesBuilder> packet;
+  ASSERT_DEATH(packet = PacketWithFixedArraysOfBytesBuilder::Create(byte_array, word_array), "size");
+}
+
+vector<uint8_t> one_variable{
+    0x03, 'o', 'n', 'e',  // "one"
+};
+
+TEST(GeneratedPacketTest, testOneVariableField) {
+  std::vector<Variable> sized_array;
+  sized_array.emplace_back("one");
+
+  auto packet = OneVariableBuilder::Create(sized_array[0]);
+  ASSERT_EQ(one_variable.size(), packet->size());
+
+  std::shared_ptr<std::vector<uint8_t>> packet_bytes = std::make_shared<std::vector<uint8_t>>();
+  BitInserter it(*packet_bytes);
+  packet->Serialize(it);
+
+  ASSERT_EQ(one_variable.size(), packet_bytes->size());
+  for (size_t i = 0; i < one_variable.size(); i++) {
+    ASSERT_EQ(one_variable[i], packet_bytes->at(i));
+  }
+
+  PacketView<kLittleEndian> packet_bytes_view(packet_bytes);
+  auto view = OneVariableView::Create(packet_bytes_view);
+  ASSERT_TRUE(view.IsValid());
+  auto array = view.GetOne();
+  ASSERT_EQ(sized_array.size(), array.size());
+  for (size_t i = 0; i < sized_array.size(); i++) {
+    ASSERT_EQ(array[i].data, sized_array[i].data);
+  }
+}
+
+vector<uint8_t> sized_array_variable{
+    0x0e,                           // _size_
+    0x03, 'o', 'n', 'e',            // "one"
+    0x03, 't', 'w', 'o',            // "two"
+    0x05, 't', 'h', 'r', 'e', 'e',  // "three"
+};
+
+TEST(GeneratedPacketTest, testSizedArrayVariableLength) {
+  std::vector<Variable> sized_array;
+  sized_array.emplace_back("one");
+  sized_array.emplace_back("two");
+  sized_array.emplace_back("three");
+
+  auto packet = SizedArrayVariableBuilder::Create(sized_array);
+  ASSERT_EQ(sized_array_variable.size(), packet->size());
+
+  std::shared_ptr<std::vector<uint8_t>> packet_bytes = std::make_shared<std::vector<uint8_t>>();
+  BitInserter it(*packet_bytes);
+  packet->Serialize(it);
+
+  ASSERT_EQ(sized_array_variable.size(), packet_bytes->size());
+  for (size_t i = 0; i < sized_array_variable.size(); i++) {
+    ASSERT_EQ(sized_array_variable[i], packet_bytes->at(i));
+  }
+
+  PacketView<kLittleEndian> packet_bytes_view(packet_bytes);
+  auto view = SizedArrayVariableView::Create(packet_bytes_view);
+  ASSERT_TRUE(view.IsValid());
+  auto array = view.GetVariableArray();
+  ASSERT_EQ(sized_array.size(), array.size());
+  for (size_t i = 0; i < sized_array.size(); i++) {
+    ASSERT_EQ(array[i].data, sized_array[i].data);
+  }
+}
+
+vector<uint8_t> fixed_array_variable{
+    0x03, 'o', 'n', 'e',            // "one"
+    0x03, 't', 'w', 'o',            // "two"
+    0x05, 't', 'h', 'r', 'e', 'e',  // "three"
+    0x04, 'f', 'o', 'u', 'r',       // "four"
+    0x04, 'f', 'i', 'v', 'e',       // "five"
+};
+
+TEST(GeneratedPacketTest, testFixedArrayVariableLength) {
+  std::vector<Variable> fixed_array;
+  fixed_array.emplace_back("one");
+  fixed_array.emplace_back("two");
+  fixed_array.emplace_back("three");
+  fixed_array.emplace_back("four");
+  fixed_array.emplace_back("five");
+
+  auto packet = FixedArrayVariableBuilder::Create(fixed_array);
+  ASSERT_EQ(fixed_array_variable.size(), packet->size());
+
+  std::shared_ptr<std::vector<uint8_t>> packet_bytes = std::make_shared<std::vector<uint8_t>>();
+  BitInserter it(*packet_bytes);
+  packet->Serialize(it);
+
+  ASSERT_EQ(fixed_array_variable.size(), packet_bytes->size());
+  for (size_t i = 0; i < fixed_array_variable.size(); i++) {
+    ASSERT_EQ(fixed_array_variable[i], packet_bytes->at(i));
+  }
+
+  PacketView<kLittleEndian> packet_bytes_view(packet_bytes);
+  auto view = FixedArrayVariableView::Create(packet_bytes_view);
+  ASSERT_TRUE(view.IsValid());
+  auto array = view.GetVariableArray();
+  ASSERT_EQ(fixed_array.size(), array.size());
+  for (size_t i = 0; i < fixed_array.size(); i++) {
+    ASSERT_EQ(array[i].data, fixed_array[i].data);
+  }
+}
+
+vector<uint8_t> count_array_variable{
+    0x04,                           // _count_
+    0x03, 'o', 'n', 'e',            // "one"
+    0x03, 't', 'w', 'o',            // "two"
+    0x05, 't', 'h', 'r', 'e', 'e',  // "three"
+    0x04, 'f', 'o', 'u', 'r',       // "four"
+};
+
+TEST(GeneratedPacketTest, testCountArrayVariableLength) {
+  std::vector<Variable> count_array;
+  count_array.emplace_back("one");
+  count_array.emplace_back("two");
+  count_array.emplace_back("three");
+  count_array.emplace_back("four");
+
+  auto packet = CountArrayVariableBuilder::Create(count_array);
+  ASSERT_EQ(count_array_variable.size(), packet->size());
+
+  std::shared_ptr<std::vector<uint8_t>> packet_bytes = std::make_shared<std::vector<uint8_t>>();
+  BitInserter it(*packet_bytes);
+  packet->Serialize(it);
+
+  ASSERT_EQ(count_array_variable.size(), packet_bytes->size());
+  for (size_t i = 0; i < count_array_variable.size(); i++) {
+    ASSERT_EQ(count_array_variable[i], packet_bytes->at(i));
+  }
+
+  PacketView<kLittleEndian> packet_bytes_view(packet_bytes);
+  auto view = CountArrayVariableView::Create(packet_bytes_view);
+  ASSERT_TRUE(view.IsValid());
+  auto array = view.GetVariableArray();
+  ASSERT_EQ(count_array.size(), array.size());
+  for (size_t i = 0; i < count_array.size(); i++) {
+    ASSERT_EQ(array[i].data, count_array[i].data);
+  }
+}
 }  // namespace parser
 }  // namespace packet
 }  // namespace bluetooth

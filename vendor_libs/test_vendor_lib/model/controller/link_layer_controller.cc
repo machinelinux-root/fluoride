@@ -34,6 +34,7 @@
 #include "packets/link_layer/inquiry_view.h"
 #include "packets/link_layer/io_capability_view.h"
 #include "packets/link_layer/le_advertisement_view.h"
+#include "packets/link_layer/page_reject_view.h"
 #include "packets/link_layer/page_response_view.h"
 #include "packets/link_layer/page_view.h"
 #include "packets/link_layer/response_view.h"
@@ -177,6 +178,9 @@ void LinkLayerController::IncomingPacket(LinkLayerPacketView incoming) {
       if (page_scans_enabled_) {
         IncomingPagePacket(incoming);
       }
+      break;
+    case Link::PacketType::PAGE_REJECT:
+      IncomingPageRejectPacket(incoming);
       break;
     case Link::PacketType::PAGE_RESPONSE:
       IncomingPageResponsePacket(incoming);
@@ -446,7 +450,6 @@ void LinkLayerController::IncomingIoCapabilityNegativeResponsePacket(LinkLayerPa
 }
 
 void LinkLayerController::IncomingLeAdvertisementPacket(LinkLayerPacketView incoming) {
-  LOG_INFO(LOG_TAG, "LE Advertisement Packet");
   // TODO: Handle multiple advertisements per packet.
 
   LeAdvertisementView advertisement = LeAdvertisementView::GetLeAdvertisementView(incoming);
@@ -457,7 +460,6 @@ void LinkLayerController::IncomingLeAdvertisementPacket(LinkLayerPacketView inco
     vector<uint8_t> ad;
     auto itr = advertisement.GetData();
     size_t ad_size = itr.NumBytesRemaining();
-    LOG_INFO(LOG_TAG, "Sending advertisement %d", static_cast<int>(ad_size));
     for (size_t i = 0; i < ad_size; i++) {
       ad.push_back(itr.extract<uint8_t>());
     }
@@ -519,7 +521,6 @@ void LinkLayerController::IncomingLeAdvertisementPacket(LinkLayerPacketView inco
 
   // Active scanning
   if (le_scan_enable_ && le_scan_type_ == 1) {
-    LOG_INFO(LOG_TAG, "Send Scan Packet");
     std::shared_ptr<LinkLayerPacketBuilder> to_send =
         LinkLayerPacketBuilder::WrapLeScan(properties_.GetLeAddress(), incoming.GetSourceAddress());
     SendLELinkLayerPacket(to_send);
@@ -538,7 +539,6 @@ void LinkLayerController::IncomingLeScanPacket(LinkLayerPacketView incoming) {
 }
 
 void LinkLayerController::IncomingLeScanResponsePacket(LinkLayerPacketView incoming) {
-  LOG_INFO(LOG_TAG, "LE Scan Response Packet");
   LeAdvertisementView scan_response = LeAdvertisementView::GetLeAdvertisementView(incoming);
   vector<uint8_t> ad;
   auto itr = scan_response.GetData();
@@ -569,6 +569,15 @@ void LinkLayerController::IncomingPagePacket(LinkLayerPacketView incoming) {
 
   send_event_(EventPacketBuilder::CreateConnectionRequestEvent(incoming.GetSourceAddress(), page.GetClassOfDevice(),
                                                                hci::LinkType::ACL)
+                  ->ToVector());
+}
+
+void LinkLayerController::IncomingPageRejectPacket(LinkLayerPacketView incoming) {
+  LOG_INFO(LOG_TAG, "%s: %s", __func__, incoming.GetSourceAddress().ToString().c_str());
+  PageRejectView reject = PageRejectView::GetPageReject(incoming);
+  LOG_INFO(LOG_TAG, "%s: Sending CreateConnectionComplete", __func__);
+  send_event_(EventPacketBuilder::CreateConnectionCompleteEvent(static_cast<hci::Status>(reject.GetReason()), 0x0eff,
+                                                                incoming.GetSourceAddress(), hci::LinkType::ACL, false)
                   ->ToVector());
 }
 
@@ -951,7 +960,12 @@ hci::Status LinkLayerController::RejectConnectionRequest(const Address& addr, ui
 }
 
 void LinkLayerController::RejectSlaveConnection(const Address& addr, uint8_t reason) {
-  CHECK(reason > 0x0f || reason < 0x0d);
+  std::shared_ptr<LinkLayerPacketBuilder> to_send = LinkLayerPacketBuilder::WrapPageReject(
+      PageRejectBuilder::Create(reason), properties_.GetAddress(), addr);
+  LOG_INFO(LOG_TAG, "%s sending page reject to %s", __func__, addr.ToString().c_str());
+  SendLinkLayerPacket(to_send);
+
+  CHECK(reason >= 0x0d && reason <= 0x0f);
   send_event_(EventPacketBuilder::CreateConnectionCompleteEvent(static_cast<hci::Status>(reason), 0xeff, addr,
                                                                 hci::LinkType::ACL, false)
                   ->ToVector());
