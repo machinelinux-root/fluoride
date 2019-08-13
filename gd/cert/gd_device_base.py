@@ -32,13 +32,22 @@ ANDROID_HOST_OUT = os.environ.get('ANDROID_HOST_OUT')
 WAIT_CHANNEL_READY_TIMEOUT = 10
 
 def replace_vars(string, config):
+    serial_number = config.get("serial_number")
+    if serial_number is None:
+        serial_number = ""
+    rootcanal_port = config.get("rootcanal_port")
+    if rootcanal_port is None:
+        rootcanal_port = ""
     return string.replace("$ANDROID_HOST_OUT", ANDROID_HOST_OUT) \
                  .replace("$(grpc_port)", config.get("grpc_port")) \
                  .replace("$(grpc_root_server_port)", config.get("grpc_root_server_port")) \
-                 .replace("$(rootcanal_port)", config.get("rootcanal_port"))
+                 .replace("$(rootcanal_port)", rootcanal_port) \
+                 .replace("$(signal_port)", config.get("signal_port")) \
+                 .replace("$(serial_number)", serial_number)
 
 class GdDeviceBase:
-    def __init__(self, grpc_port, grpc_root_server_port, cmd, label, type_identifier):
+    def __init__(self, grpc_port, grpc_root_server_port, signal_port, cmd,
+                 label, type_identifier):
         self.label = label if label is not None else grpc_port
         # logging.log_path only exists when this is used in an ACTS test run.
         log_path_base = getattr(logging, 'log_path', '/tmp/logs')
@@ -55,13 +64,12 @@ class GdDeviceBase:
         btsnoop_path = os.path.join(log_path_base, '%s_btsnoop_hci.log' % label)
         cmd.append("--btsnoop=" + btsnoop_path)
 
-        tester_signal_socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        socket_address = os.path.join(
-            log_path_base, '%s_socket' % type_identifier)
+        tester_signal_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        tester_signal_socket.setsockopt(
+            socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        socket_address = ('localhost', int(signal_port))
         tester_signal_socket.bind(socket_address)
         tester_signal_socket.listen(1)
-
-        cmd.append("--tester-signal-socket=" + socket_address)
 
         self.backing_process = subprocess.Popen(
             cmd,
@@ -71,7 +79,6 @@ class GdDeviceBase:
             stderr=self.backing_process_logs)
         tester_signal_socket.accept()
         tester_signal_socket.close()
-        os.unlink(socket_address)
 
         self.grpc_root_server_channel = grpc.insecure_channel("localhost:" + grpc_root_server_port)
         self.grpc_port = int(grpc_port)

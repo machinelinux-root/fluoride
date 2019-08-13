@@ -104,9 +104,20 @@ struct HciLayer::impl : public hal::HciHalCallbacks {
                          handler);
     RegisterEventHandler(EventCode::COMMAND_STATUS, Bind(&impl::command_status_callback, common::Unretained(this)),
                          handler);
+    // TODO find the right place
+    RegisterEventHandler(EventCode::CONNECTION_PACKET_TYPE_CHANGE, Bind(&impl::drop, common::Unretained(this)),
+                         handler);
+    RegisterEventHandler(EventCode::ROLE_CHANGE, Bind(&impl::drop, common::Unretained(this)), handler);
+    RegisterEventHandler(EventCode::PAGE_SCAN_REPETITION_MODE_CHANGE, Bind(&impl::drop, common::Unretained(this)),
+                         handler);
+    RegisterEventHandler(EventCode::MAX_SLOTS_CHANGE, Bind(&impl::drop, common::Unretained(this)), handler);
+    RegisterEventHandler(EventCode::VENDOR_SPECIFIC, Bind(&impl::drop, common::Unretained(this)), handler);
+
     EnqueueCommand(ResetBuilder::Create(), BindOnce(&fail_if_reset_complete_not_success), handler);
     hal_->registerIncomingPacketCallback(this);
   }
+
+  void drop(EventPacketView) {}
 
   void dequeue_and_send_acl() {
     auto packet = acl_queue_.GetDownEnd()->TryDequeue();
@@ -194,8 +205,8 @@ struct HciLayer::impl : public hal::HciHalCallbacks {
 
   void hci_event_received_handler(EventPacketView event) {
     EventCode event_code = event.GetEventCode();
-    ASSERT_LOG(event_handlers_.find(event_code) != event_handlers_.end(), "Unhandled event of type 0x%02hhx",
-               event.GetEventCode());
+    ASSERT_LOG(event_handlers_.find(event_code) != event_handlers_.end(), "Unhandled event of type 0x%02hhx (%s)",
+               event.GetEventCode(), EventCodeText(event.GetEventCode()).c_str());
     auto& registered_handler = event_handlers_[event_code].event_handler;
     event_handlers_[event_code].handler->Post(BindOnce(registered_handler, std::move(event)));
   }
