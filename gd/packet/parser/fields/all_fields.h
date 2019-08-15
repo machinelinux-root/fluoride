@@ -16,14 +16,20 @@
 
 #pragma once
 
+#include "fields/array_field.h"
 #include "fields/body_field.h"
 #include "fields/checksum_field.h"
 #include "fields/checksum_start_field.h"
+#include "fields/count_field.h"
 #include "fields/custom_field.h"
+#include "fields/custom_field_fixed_size.h"
 #include "fields/enum_field.h"
-#include "fields/fixed_field.h"
+#include "fields/fixed_enum_field.h"
+#include "fields/fixed_scalar_field.h"
 #include "fields/group_field.h"
 #include "fields/payload_field.h"
 #include "fields/reserved_field.h"
 #include "fields/scalar_field.h"
 #include "fields/size_field.h"
+#include "fields/struct_field.h"
+#include "fields/vector_field.h"

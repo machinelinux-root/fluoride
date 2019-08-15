@@ -19,20 +19,25 @@
 #include <iostream>
 
 #include "fields/custom_field.h"
+#include "fields/custom_field_fixed_size.h"
 #include "parse_location.h"
 #include "type_def.h"
 
 class CustomFieldDef : public TypeDef {
  public:
+  CustomFieldDef(std::string name, std::string include);
+
   CustomFieldDef(std::string name, std::string include, int size);
 
   virtual PacketField* GetNewField(const std::string& name, ParseLocation loc) const override;
 
   virtual Type GetDefinitionType() const override;
 
-  virtual void GenInclude(std::ostream& s) const;
+  void GenInclude(std::ostream& s) const;
 
-  virtual void GenUsing(std::ostream& s) const;
+  void GenUsing(std::ostream& s) const;
+
+  void GenCustomFieldCheck(std::ostream& s) const;
 
   const std::string include_;
 };

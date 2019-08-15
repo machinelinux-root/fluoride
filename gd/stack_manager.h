@@ -33,9 +33,12 @@ class StackManager {
   }
 
  private:
-  os::Thread* management_thread_;
-  os::Handler* handler_;
+  os::Thread* management_thread_ = nullptr;
+  os::Handler* handler_ = nullptr;
   ModuleRegistry registry_;
+
+  void handle_start_up(ModuleList* modules, os::Thread* stack_thread, std::promise<void> promise);
+  void handle_shut_down(std::promise<void> promise);
 };
 
 }  // namespace bluetooth

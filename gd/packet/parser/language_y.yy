@@ -44,6 +44,8 @@
   FieldList* packet_field_definitions;
   PacketField* packet_field_type;
 
+  StructDef* struct_definition_value;
+
   std::map<std::string, std::variant<int64_t, std::string>>* constraint_list_t;
   std::pair<std::string, std::variant<int64_t, std::string>>* constraint_t;
 }
@@ -58,6 +60,7 @@
 %token PACKET "packet"
 %token PAYLOAD "payload"
 %token BODY "body"
+%token STRUCT "struct"
 %token SIZE "size"
 %token COUNT "count"
 %token FIXED "fixed"
@@ -83,6 +86,9 @@
 %type<packet_field_type> body_field_definition;
 %type<packet_field_type> fixed_field_definition;
 %type<packet_field_type> reserved_field_definition;
+%type<packet_field_type> array_field_definition;
+
+%type<struct_definition_value> struct_definition;
 
 %type<constraint_list_t> constraint_list;
 %type<constraint_t> constraint;
@@ -116,6 +122,11 @@ declaration
       std::cerr << "FOUND PACKET\n\n";
       decls->AddPacketDef($1->name_, std::move(*$1));
       delete $1;
+    }
+  | struct_definition
+    {
+      std::cerr << "FOUND STRUCT\n\n";
+      decls->AddTypeDef($1->name_, $1);
     }
   | group_definition
     {
@@ -191,6 +202,88 @@ custom_field_definition
       decls->AddTypeDef(*$2, new CustomFieldDef(*$2, *$5, $4));
       delete $2;
       delete $5;
+    }
+  | CUSTOM_FIELD IDENTIFIER STRING
+    {
+      decls->AddTypeDef(*$2, new CustomFieldDef(*$2, *$3));
+      delete $2;
+      delete $3;
+    }
+
+struct_definition
+  : STRUCT IDENTIFIER '{' field_definition_list '}'
+    {
+      auto&& struct_name = *$2;
+      auto&& field_definition_list = *$4;
+
+      DEBUG() << "Struct " << struct_name << " with no parent";
+      DEBUG() << "STRUCT FIELD LIST SIZE: " << field_definition_list.size();
+      auto struct_definition = new StructDef(std::move(struct_name), std::move(field_definition_list));
+      struct_definition->AssignSizeFields();
+
+      $$ = struct_definition;
+      delete $2;
+      delete $4;
+    }
+  | STRUCT IDENTIFIER ':' IDENTIFIER '{' field_definition_list '}'
+    {
+      auto&& struct_name = *$2;
+      auto&& parent_struct_name = *$4;
+      auto&& field_definition_list = *$6;
+
+      std::cerr << "Struct " << struct_name << " with parent " << parent_struct_name << "\n";
+      std::cerr << "STRUCT FIELD LIST SIZE: " << field_definition_list.size() << "\n";
+
+      auto parent_struct = decls->GetTypeDef(parent_struct_name);
+      if (parent_struct == nullptr) {
+        ERRORLOC(LOC) << "Could not find struct " << parent_struct_name
+                  << " used as parent for " << struct_name;
+      }
+
+      if (parent_struct->GetDefinitionType() != TypeDef::Type::STRUCT) {
+        ERRORLOC(LOC) << parent_struct_name << " is not a struct";
+      }
+      auto struct_definition = new StructDef(std::move(struct_name), std::move(field_definition_list), (StructDef*)parent_struct);
+      struct_definition->AssignSizeFields();
+
+      $$ = struct_definition;
+      delete $2;
+      delete $4;
+      delete $6;
+    }
+  | STRUCT IDENTIFIER ':' IDENTIFIER '(' constraint_list ')' '{' field_definition_list '}'
+    {
+      auto&& struct_name = *$2;
+      auto&& parent_struct_name = *$4;
+      auto&& constraints = *$6;
+      auto&& field_definition_list = *$9;
+
+      auto parent_struct = decls->GetTypeDef(parent_struct_name);
+      if (parent_struct == nullptr) {
+        ERRORLOC(LOC) << "Could not find struct " << parent_struct_name
+                  << " used as parent for " << struct_name;
+      }
+
+      if (parent_struct->GetDefinitionType() != TypeDef::Type::STRUCT) {
+        ERRORLOC(LOC) << parent_struct_name << " is not a struct";
+      }
+
+      auto struct_definition = new StructDef(std::move(struct_name), std::move(field_definition_list), (StructDef*)parent_struct);
+      struct_definition->AssignSizeFields();
+
+      for (const auto& constraint : constraints) {
+        const auto& constraint_name = constraint.first;
+        const auto& constraint_value = constraint.second;
+        DEBUG() << "Parent constraint on " << constraint_name;
+        struct_definition->AddParentConstraint(constraint_name, constraint_value);
+      }
+
+      $$ = struct_definition;
+
+      delete $2;
+      delete $4;
+      delete $6;
+      delete $9;
     }
 
 packet_definition
@@ -277,7 +370,7 @@ field_definition_list
       std::cerr << "Field definition\n";
       $$ = new FieldList();
 
-      if ($1->GetFieldType() == PacketField::Type::GROUP) {
+      if ($1->GetFieldType() == GroupField::kFieldType) {
         auto group_fields = static_cast<GroupField*>($1)->GetFields();
 	FieldList reversed_fields(group_fields->rbegin(), group_fields->rend());
         for (auto& field : reversed_fields) {
@@ -294,7 +387,7 @@ field_definition_list
       std::cerr << "Field definition with list\n";
       $$ = $3;
 
-      if ($1->GetFieldType() == PacketField::Type::GROUP) {
+      if ($1->GetFieldType() == GroupField::kFieldType) {
         auto group_fields = static_cast<GroupField*>($1)->GetFields();
 	FieldList reversed_fields(group_fields->rbegin(), group_fields->rend());
         for (auto& field : reversed_fields) {
@@ -353,6 +446,11 @@ field_definition
       std::cerr << "Reserved field\n";
       $$ = $1;
     }
+  | array_field_definition
+    {
+      std::cerr << "ARRAY field\n";
+      $$ = $1;
+    }
 
 group_field_definition
   : IDENTIFIER
@@ -379,24 +477,24 @@ group_field_definition
       for (const auto field : *group) {
         const auto constraint = $3->find(field->GetName());
         if (constraint != $3->end()) {
-          if (field->GetFieldType() == PacketField::Type::SCALAR) {
+          if (field->GetFieldType() == ScalarField::kFieldType) {
             std::cerr << "Fixing group scalar value\n";
-            expanded_fields->push_back(new FixedField(field->GetSize().bits(), std::get<int64_t>(constraint->second), LOC));
-          } else if (field->GetFieldType() == PacketField::Type::ENUM) {
+            expanded_fields->push_back(new FixedScalarField(field->GetSize().bits(), std::get<int64_t>(constraint->second), LOC));
+          } else if (field->GetFieldType() == EnumField::kFieldType) {
             std::cerr << "Fixing group enum value\n";
 
-            auto type_def = decls->GetTypeDef(field->GetType());
+            auto type_def = decls->GetTypeDef(field->GetDataType());
             EnumDef* enum_def = (type_def->GetDefinitionType() == TypeDef::Type::ENUM ? (EnumDef*)type_def : nullptr);
             if (enum_def == nullptr) {
-              ERRORLOC(LOC) << "No enum found of type " << field->GetType();
+              ERRORLOC(LOC) << "No enum found of type " << field->GetDataType();
             }
             if (!enum_def->HasEntry(std::get<std::string>(constraint->second))) {
-              ERRORLOC(LOC) << "Enum " << field->GetType() << " has no enumeration " << std::get<std::string>(constraint->second);
+              ERRORLOC(LOC) << "Enum " << field->GetDataType() << " has no enumeration " << std::get<std::string>(constraint->second);
             }
 
-            expanded_fields->push_back(new FixedField(enum_def, std::get<std::string>(constraint->second), LOC));
+            expanded_fields->push_back(new FixedEnumField(enum_def, std::get<std::string>(constraint->second), LOC));
           } else {
-            ERRORLOC(LOC) << "Unimplemented constraint of type " << field->GetType();
+            ERRORLOC(LOC) << "Unimplemented constraint of type " << field->GetFieldType();
           }
           $3->erase(constraint);
         } else {
@@ -480,10 +578,6 @@ payload_field_definition
       $$ = new PayloadField(*$4, LOC);
       delete $4;
     }
-  | PAYLOAD ':' '[' INTEGER ']'
-    {
-      ERRORLOC(LOC) << "Payload fields can only be dynamically sized.";
-    }
   | PAYLOAD
     {
       std::cerr << "Payload field\n";
@@ -502,30 +596,26 @@ size_field_definition
   : SIZE '(' IDENTIFIER ')' ':' INTEGER
     {
       std::cerr << "Size field defined\n";
-      $$ = new SizeField(*$3, $6, false, LOC);
+      $$ = new SizeField(*$3, $6, LOC);
       delete $3;
     }
   | SIZE '(' PAYLOAD ')' ':' INTEGER
     {
       std::cerr << "Size for payload defined\n";
-      $$ = new SizeField("payload", $6, false, LOC);
+      $$ = new SizeField("payload", $6, LOC);
     }
   | COUNT '(' IDENTIFIER ')' ':' INTEGER
     {
       std::cerr << "Count field defined\n";
-      $$ = new SizeField(*$3, $6, true, LOC);
+      $$ = new CountField(*$3, $6, LOC);
       delete $3;
-    }
-  | COUNT '(' PAYLOAD ')' ':' INTEGER
-    {
-      ERRORLOC(LOC) << "Can not use count to describe payload fields.";
     }
 
 fixed_field_definition
   : FIXED '=' INTEGER ':' INTEGER
     {
       std::cerr << "Fixed field defined value=" << $3 << " size=" << $5 << "\n";
-      $$ = new FixedField($5, $3, LOC);
+      $$ = new FixedScalarField($5, $3, LOC);
     }
   | FIXED '=' IDENTIFIER ':' IDENTIFIER
     {
@@ -537,7 +627,7 @@ fixed_field_definition
           ERRORLOC(LOC) << "Previously defined enum " << enum_def->GetTypeName() << " has no entry for " << *$3;
         }
 
-        $$ = new FixedField(enum_def, *$3, LOC);
+        $$ = new FixedEnumField(enum_def, *$3, LOC);
       } else {
         ERRORLOC(LOC) << "No enum found with name " << *$5;
       }
@@ -551,6 +641,65 @@ reserved_field_definition
     {
       std::cerr << "Reserved field of size=" << $3 << "\n";
       $$ = new ReservedField($3, LOC);
+    }
+
+array_field_definition
+  : IDENTIFIER ':' INTEGER '[' ']'
+    {
+      DEBUG() << "Vector field defined name=" << *$1 << " element_size=" << $3;
+      $$ = new VectorField(*$1, $3, "", LOC);
+      delete $1;
+    }
+  | IDENTIFIER ':' INTEGER '[' SIZE_MODIFIER ']'
+    {
+      DEBUG() << "Vector field defined name=" << *$1 << " element_size=" << $3
+             << " size_modifier=" << *$5;
+      $$ = new VectorField(*$1, $3, *$5, LOC);
+      delete $1;
+      delete $5;
+    }
+  | IDENTIFIER ':' INTEGER '[' INTEGER ']'
+    {
+      DEBUG() << "Array field defined name=" << *$1 << " element_size=" << $3
+             << " fixed_size=" << $5;
+      $$ = new ArrayField(*$1, $3, $5, LOC);
+      delete $1;
+    }
+  | IDENTIFIER ':' IDENTIFIER '[' ']'
+    {
+      DEBUG() << "Vector field defined name=" << *$1 << " type=" << *$3;
+      if (auto type_def = decls->GetTypeDef(*$3)) {
+        $$ = new VectorField(*$1, type_def, "", LOC);
+      } else {
+        ERRORLOC(LOC) << "Can't find type used in array field.";
+      }
+      delete $1;
+      delete $3;
+    }
+  | IDENTIFIER ':' IDENTIFIER '[' SIZE_MODIFIER ']'
+    {
+      DEBUG() << "Vector field defined name=" << *$1 << " type=" << *$3
+             << " size_modifier=" << *$5;
+      if (auto type_def = decls->GetTypeDef(*$3)) {
+        $$ = new VectorField(*$1, type_def, *$5, LOC);
+      } else {
+        ERRORLOC(LOC) << "Can't find type used in array field.";
+      }
+      delete $1;
+      delete $3;
+      delete $5;
+    }
+  | IDENTIFIER ':' IDENTIFIER '[' INTEGER ']'
+    {
+      DEBUG() << "Array field defined name=" << *$1 << " type=" << *$3
+             << " fixed_size=" << $5;
+      if (auto type_def = decls->GetTypeDef(*$3)) {
+        $$ = new ArrayField(*$1, type_def, $5, LOC);
+      } else {
+        ERRORLOC(LOC) << "Can't find type used in array field.";
+      }
+      delete $1;
+      delete $3;
     }
 
 %%

@@ -18,6 +18,8 @@
 
 #include "util.h"
 
+CustomFieldDef::CustomFieldDef(std::string name, std::string include) : TypeDef(name), include_(include) {}
+
 CustomFieldDef::CustomFieldDef(std::string name, std::string include, int size)
     : TypeDef(name, size), include_(include) {
   if (size % 8 != 0) {
@@ -26,7 +28,11 @@ CustomFieldDef::CustomFieldDef(std::string name, std::string include, int size)
 }
 
 PacketField* CustomFieldDef::GetNewField(const std::string& name, ParseLocation loc) const {
-  return new CustomField(name, name_, size_, loc);
+  if (size_ == -1) {
+    return new CustomField(name, name_, loc);
+  } else {
+    return new CustomFieldFixedSize(name, name_, size_, loc);
+  }
 }
 
 TypeDef::Type CustomFieldDef::GetDefinitionType() const {
@@ -49,4 +55,9 @@ void CustomFieldDef::GenUsing(std::ostream& s) const {
     }
   }
   s << GetTypeName() << ";";
+}
+
+void CustomFieldDef::GenCustomFieldCheck(std::ostream& s) const {
+  s << "static_assert(CustomTypeChecker<" << name_ << ">::value, \"";
+  s << name_ << " is not a valid custom field type. Please see README for more details.\");";
 }

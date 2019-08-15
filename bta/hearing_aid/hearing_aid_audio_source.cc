@@ -38,8 +38,8 @@ int sample_rate = -1;
 int data_interval_ms = -1;
 int num_channels = 2;
 bluetooth::common::RepeatingTimer audio_timer;
-HearingAidAudioReceiver* localAudioReceiver;
-std::unique_ptr<tUIPC_STATE> uipc_hearing_aid;
+HearingAidAudioReceiver* localAudioReceiver = nullptr;
+std::unique_ptr<tUIPC_STATE> uipc_hearing_aid = nullptr;
 
 struct AudioHalStats {
   size_t media_read_total_underflow_bytes;
@@ -85,7 +85,9 @@ void send_audio_data() {
 
   std::vector<uint8_t> data(p_buf, p_buf + bytes_read);
 
-  localAudioReceiver->OnAudioDataReady(data);
+  if (localAudioReceiver != nullptr) {
+    localAudioReceiver->OnAudioDataReady(data);
+  }
 }
 
 void hearing_aid_send_ack(tHEARING_AID_CTRL_ACK status) {
@@ -95,12 +97,20 @@ void hearing_aid_send_ack(tHEARING_AID_CTRL_ACK status) {
 }
 
 void start_audio_ticks() {
+  if (data_interval_ms != HA_INTERVAL_10_MS &&
+      data_interval_ms != HA_INTERVAL_20_MS) {
+    LOG(FATAL) << " Unsupported data interval: " << data_interval_ms;
+  }
+
   wakelock_acquire();
-  audio_timer.SchedulePeriodic(get_main_thread()->GetWeakPtr(), FROM_HERE, base::Bind(&send_audio_data),
-                               base::TimeDelta::FromMilliseconds(data_interval_ms));
+  audio_timer.SchedulePeriodic(
+      get_main_thread()->GetWeakPtr(), FROM_HERE, base::Bind(&send_audio_data),
+      base::TimeDelta::FromMilliseconds(data_interval_ms));
+  LOG(INFO) << __func__ << ": running with data interval: " << data_interval_ms;
 }
 
 void stop_audio_ticks() {
+  LOG(INFO) << __func__ << ": stopped";
   audio_timer.CancelAndWait();
   wakelock_release();
 }
@@ -119,17 +129,12 @@ void hearing_aid_data_cb(tUIPC_CH_ID, tUIPC_EVENT event) {
       UIPC_Ioctl(*uipc_hearing_aid, UIPC_CH_ID_AV_AUDIO, UIPC_SET_READ_POLL_TMO,
                  reinterpret_cast<void*>(0));
 
-      if (data_interval_ms != HA_INTERVAL_10_MS &&
-          data_interval_ms != HA_INTERVAL_20_MS) {
-        LOG(FATAL) << " Unsupported data interval: " << data_interval_ms;
-      }
-
-      start_audio_ticks();
+      do_in_main_thread(FROM_HERE, base::BindOnce(start_audio_ticks));
       break;
     case UIPC_CLOSE_EVT:
       LOG(INFO) << __func__ << ": UIPC_CLOSE_EVT";
       hearing_aid_send_ack(HEARING_AID_CTRL_ACK_SUCCESS);
-      stop_audio_ticks();
+      do_in_main_thread(FROM_HERE, base::BindOnce(stop_audio_ticks));
       break;
     default:
       LOG(ERROR) << "Hearing Aid audio data event not recognized:" << event;
@@ -304,73 +309,59 @@ void hearing_aid_ctrl_cb(tUIPC_CH_ID, tUIPC_EVENT event) {
 }
 
 bool hearing_aid_on_resume_req(bool start_media_task) {
-  // hearing_aid_recv_ctrl_data(HEARING_AID_CTRL_CMD_START)
-  if (localAudioReceiver) {
-    // Call OnAudioResume and block till it returns.
-    std::promise<void> do_resume_promise;
-    std::future<void> do_resume_future = do_resume_promise.get_future();
-    bt_status_t status = do_in_main_thread(
-        FROM_HERE, base::BindOnce(&HearingAidAudioReceiver::OnAudioResume,
-                                  base::Unretained(localAudioReceiver),
-                                  std::move(do_resume_promise)));
-    if (status == BT_STATUS_SUCCESS) {
-      do_resume_future.wait();
-    } else {
-      LOG(ERROR) << __func__
-                 << ": HEARING_AID_CTRL_CMD_START: do_in_main_thread err="
-                 << status;
-      return false;
-    }
-  } else {
+  if (localAudioReceiver == nullptr) {
     LOG(ERROR) << __func__
                << ": HEARING_AID_CTRL_CMD_START: audio receiver not started";
     return false;
   }
-
-  // hearing_aid_data_cb(UIPC_OPEN_EVT): start_media_task
+  bt_status_t status;
   if (start_media_task) {
-    if (data_interval_ms != HA_INTERVAL_10_MS &&
-        data_interval_ms != HA_INTERVAL_20_MS) {
-      LOG(FATAL) << " Unsupported data interval: " << data_interval_ms;
-      data_interval_ms = HA_INTERVAL_10_MS;
-    }
-    start_audio_ticks();
+    status = do_in_main_thread(
+        FROM_HERE, base::BindOnce(&HearingAidAudioReceiver::OnAudioResume,
+                                  base::Unretained(localAudioReceiver),
+                                  start_audio_ticks));
+  } else {
+    auto start_dummy_ticks = []() {
+      LOG(INFO) << "start_audio_ticks: waiting for data path opened";
+    };
+    status = do_in_main_thread(
+        FROM_HERE, base::BindOnce(&HearingAidAudioReceiver::OnAudioResume,
+                                  base::Unretained(localAudioReceiver),
+                                  start_dummy_ticks));
+  }
+  if (status != BT_STATUS_SUCCESS) {
+    LOG(ERROR) << __func__
+               << ": HEARING_AID_CTRL_CMD_START: do_in_main_thread err="
+               << status;
+    return false;
   }
   return true;
 }
 
 bool hearing_aid_on_suspend_req() {
-  // hearing_aid_recv_ctrl_data(HEARING_AID_CTRL_CMD_SUSPEND): stop_media_task
-  stop_audio_ticks();
-  if (localAudioReceiver) {
-    // Call OnAudioSuspend and block till it returns.
-    std::promise<void> do_suspend_promise;
-    std::future<void> do_suspend_future = do_suspend_promise.get_future();
-    bt_status_t status = do_in_main_thread(
-        FROM_HERE, base::BindOnce(&HearingAidAudioReceiver::OnAudioSuspend,
-                                  base::Unretained(localAudioReceiver),
-                                  std::move(do_suspend_promise)));
-    if (status == BT_STATUS_SUCCESS) {
-      do_suspend_future.wait();
-      return true;
-    } else {
-      LOG(ERROR) << __func__
-                 << ": HEARING_AID_CTRL_CMD_SUSPEND: do_in_main_thread err="
-                 << status;
-    }
-  } else {
+  if (localAudioReceiver == nullptr) {
     LOG(ERROR) << __func__
                << ": HEARING_AID_CTRL_CMD_SUSPEND: audio receiver not started";
+    return false;
   }
-  return false;
+  bt_status_t status = do_in_main_thread(
+      FROM_HERE,
+      base::BindOnce(&HearingAidAudioReceiver::OnAudioSuspend,
+                     base::Unretained(localAudioReceiver), stop_audio_ticks));
+  if (status != BT_STATUS_SUCCESS) {
+    LOG(ERROR) << __func__
+               << ": HEARING_AID_CTRL_CMD_SUSPEND: do_in_main_thread err="
+               << status;
+    return false;
+  }
+  return true;
 }
 }  // namespace
 
 void HearingAidAudioSource::Start(const CodecConfiguration& codecConfiguration,
                                   HearingAidAudioReceiver* audioReceiver,
                                   uint16_t remote_delay_ms) {
-  localAudioReceiver = audioReceiver;
-  VLOG(2) << "Hearing Aid UIPC Open";
+  LOG(INFO) << __func__ << ": Hearing Aid Source Open";
 
   bit_rate = codecConfiguration.bit_rate;
   sample_rate = codecConfiguration.sample_rate;
@@ -382,9 +373,13 @@ void HearingAidAudioSource::Start(const CodecConfiguration& codecConfiguration,
     bluetooth::audio::hearing_aid::start_session();
     bluetooth::audio::hearing_aid::set_remote_delay(remote_delay_ms);
   }
+  localAudioReceiver = audioReceiver;
 }
 
 void HearingAidAudioSource::Stop() {
+  LOG(INFO) << __func__ << ": Hearing Aid Source Close";
+
+  localAudioReceiver = nullptr;
   if (bluetooth::audio::hearing_aid::is_hal_2_0_enabled()) {
     bluetooth::audio::hearing_aid::end_session();
   }
@@ -409,6 +404,7 @@ void HearingAidAudioSource::CleanUp() {
     bluetooth::audio::hearing_aid::cleanup();
   } else {
     UIPC_Close(*uipc_hearing_aid, UIPC_CH_ID_ALL);
+    uipc_hearing_aid = nullptr;
   }
 }
 

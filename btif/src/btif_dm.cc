@@ -508,11 +508,6 @@ static void bond_state_changed(bt_status_t status, const RawAddress& bd_addr,
   auto tmp = bd_addr;
   HAL_CBACK(bt_hal_cbacks, bond_state_changed_cb, status, &tmp, state);
 
-  int dev_type;
-  if (!btif_get_device_type(bd_addr, &dev_type)) {
-    dev_type = BT_DEVICE_TYPE_BREDR;
-  }
-
   if (state == BT_BOND_STATE_BONDING ||
       (state == BT_BOND_STATE_BONDED && pairing_cb.sdp_attempts > 0)) {
     // Save state for the device is bonding or SDP.
@@ -1146,7 +1141,14 @@ static void btif_dm_auth_cmpl_evt(tBTA_DM_AUTH_CMPL* p_auth_cmpl) {
         /* Trigger SDP on the device */
         pairing_cb.sdp_attempts = 1;
 
-        // Report bonded to Java before start SDP
+        if (is_crosskey) {
+          // If bonding occurred due to cross-key pairing, send bonding callback
+          // for static address now
+          LOG_INFO(LOG_TAG,
+                   "%s: send bonding state update for static address %s",
+                   __func__, bd_addr.ToString().c_str());
+          bond_state_changed(BT_STATUS_SUCCESS, bd_addr, BT_BOND_STATE_BONDING);
+        }
         bond_state_changed(BT_STATUS_SUCCESS, bd_addr, BT_BOND_STATE_BONDED);
 
         btif_dm_get_remote_services(bd_addr);
@@ -1438,35 +1440,31 @@ static void btif_dm_search_services_evt(uint16_t event, char* p_param) {
       if (pairing_cb.state == BT_BOND_STATE_BONDED && pairing_cb.sdp_attempts &&
           (p_data->disc_res.bd_addr == pairing_cb.bd_addr ||
            p_data->disc_res.bd_addr == pairing_cb.static_bdaddr)) {
-        LOG_INFO(LOG_TAG, "%s Remote Service SDP done.", __func__);
+        LOG_INFO(LOG_TAG, "%s: SDP search done for %s", __func__,
+                 bd_addr.ToString().c_str());
         pairing_cb.sdp_attempts = 0;
 
-        // If bond occured due to cross-key pairing, send bond state callback
-        // for static address now
-        if (p_data->disc_res.bd_addr == pairing_cb.static_bdaddr) {
-          bond_state_changed(BT_STATUS_SUCCESS, bd_addr, BT_BOND_STATE_BONDING);
-          bond_state_changed(BT_STATUS_SUCCESS, bd_addr, BT_BOND_STATE_BONDED);
-        }
-        if (pairing_cb.state == BT_BOND_STATE_BONDED) {
-          if (p_data->disc_res.result == BTA_SUCCESS) {
-            // Device is bonded and SDP completed. Clear the pairing control
-            // block.
-            pairing_cb = {};
-          } else {
-            // Report empty UUID to Java if SDP report negative result while
-            // pairing.
-            bt_property_t prop;
-            Uuid uuid;
+        // Both SDP and bonding are done, clear pairing control block
+        pairing_cb = {};
 
-            prop.type = BT_PROPERTY_UUIDS;
-            prop.val = &uuid;
-            prop.len = Uuid::kNumBytes128;
+        // Send one empty UUID to Java to unblock pairing intent when SDP failed
+        // or no UUID is discovered
+        if (p_data->disc_res.result != BTA_SUCCESS ||
+            p_data->disc_res.num_uuids == 0) {
+          LOG_INFO(LOG_TAG,
+                   "%s: SDP failed, send empty UUID to unblock bonding %s",
+                   __func__, bd_addr.ToString().c_str());
+          bt_property_t prop;
+          Uuid uuid = {};
 
-            /* Send the event to the BTIF */
-            HAL_CBACK(bt_hal_cbacks, remote_device_properties_cb,
-                      BT_STATUS_SUCCESS, &bd_addr, 1, &prop);
-            break;
-          }
+          prop.type = BT_PROPERTY_UUIDS;
+          prop.val = &uuid;
+          prop.len = Uuid::kNumBytes128;
+
+          /* Send the event to the BTIF */
+          HAL_CBACK(bt_hal_cbacks, remote_device_properties_cb,
+                    BT_STATUS_SUCCESS, &bd_addr, 1, &prop);
+          break;
         }
       }
 
@@ -2913,6 +2911,10 @@ static void btif_dm_ble_auth_cmpl_evt(tBTA_DM_AUTH_CMPL* p_auth_cmpl) {
         status = BT_STATUS_FAIL;
         break;
     }
+  }
+  if (state == BT_BOND_STATE_BONDED && bd_addr != pairing_cb.static_bdaddr) {
+    // Report RPA bonding state to Java in crosskey paring
+    bond_state_changed(status, bd_addr, BT_BOND_STATE_BONDING);
   }
   bond_state_changed(status, bd_addr, state);
 }

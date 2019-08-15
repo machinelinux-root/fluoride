@@ -20,11 +20,12 @@
 #include <future>
 #include <queue>
 
+#include "common/bind.h"
 #include "hal/hci_hal.h"
-#include "os/thread.h"
+#include "module.h"
 #include "os/handler.h"
 #include "os/log.h"
-#include "module.h"
+#include "os/thread.h"
 
 using ::bluetooth::os::Handler;
 using ::bluetooth::os::Thread;
@@ -35,33 +36,39 @@ void StackManager::StartUp(ModuleList* modules, Thread* stack_thread) {
   management_thread_ = new Thread("management_thread", Thread::Priority::NORMAL);
   handler_ = new Handler(management_thread_);
 
-  std::promise<void>* promise = new std::promise<void>();
-  handler_->Post([this, promise, modules, stack_thread]() {
-    registry_.Start(modules, stack_thread);
-    promise->set_value();
-  });
+  std::promise<void> promise;
+  auto future = promise.get_future();
+  handler_->Post(common::BindOnce(&StackManager::handle_start_up, common::Unretained(this), modules, stack_thread,
+                                  std::move(promise)));
 
-  auto future = promise->get_future();
   auto init_status = future.wait_for(std::chrono::seconds(3));
   ASSERT_LOG(init_status == std::future_status::ready, "Can't start stack");
-  delete promise;
 
   LOG_INFO("init complete");
 }
 
-void StackManager::ShutDown() {
-  std::promise<void>* promise = new std::promise<void>();
-  handler_->Post([this, promise]() {
-    registry_.StopAll();
-    promise->set_value();
-  });
+void StackManager::handle_start_up(ModuleList* modules, Thread* stack_thread, std::promise<void> promise) {
+  registry_.Start(modules, stack_thread);
+  promise.set_value();
+}
 
-  auto future = promise->get_future();
+void StackManager::ShutDown() {
+  std::promise<void> promise;
+  auto future = promise.get_future();
+  handler_->Post(common::BindOnce(&StackManager::handle_shut_down, common::Unretained(this), std::move(promise)));
+
   auto stop_status = future.wait_for(std::chrono::seconds(3));
   ASSERT_LOG(stop_status == std::future_status::ready, "Can't stop stack");
 
-  delete promise;
+  handler_->Clear();
+  handler_->WaitUntilStopped(std::chrono::milliseconds(20));
   delete handler_;
   delete management_thread_;
 }
+
+void StackManager::handle_shut_down(std::promise<void> promise) {
+  registry_.StopAll();
+  promise.set_value();
+}
+
 }  // namespace bluetooth

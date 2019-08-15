@@ -25,10 +25,11 @@ ModuleFactory::ModuleFactory(std::function<Module*()> ctor) : ctor_(ctor) {
 }
 
 Handler* Module::GetHandler() {
+  ASSERT_LOG(handler_ != nullptr, "Can't get handler when it's not started");
   return handler_;
 }
 
-ModuleRegistry* Module::GetModuleRegistry() {
+const ModuleRegistry* Module::GetModuleRegistry() {
   return registry_;
 }
 
@@ -58,6 +59,11 @@ void ModuleRegistry::Start(ModuleList* modules, Thread* thread) {
   }
 }
 
+void ModuleRegistry::set_registry_and_handler(Module* instance, Thread* thread) const {
+  instance->registry_ = this;
+  instance->handler_ = new Handler(thread);
+}
+
 Module* ModuleRegistry::Start(const ModuleFactory* module, Thread* thread) {
   auto started_instance = started_modules_.find(module);
   if (started_instance != started_modules_.end()) {
@@ -65,10 +71,9 @@ Module* ModuleRegistry::Start(const ModuleFactory* module, Thread* thread) {
   }
 
   Module* instance = module->ctor_();
-  instance->registry_ = this;
-  instance->handler_ = new Handler(thread);
-  instance->ListDependencies(&instance->dependencies_);
+  set_registry_and_handler(instance, thread);
 
+  instance->ListDependencies(&instance->dependencies_);
   Start(&instance->dependencies_, thread);
 
   instance->Start();
@@ -78,12 +83,14 @@ Module* ModuleRegistry::Start(const ModuleFactory* module, Thread* thread) {
 }
 
 void ModuleRegistry::StopAll() {
-  // Since modules were brought up in dependency order,
-  // it is safe to tear down by going in reverse order.
+  // Since modules were brought up in dependency order, it is safe to tear down by going in reverse order.
   for (auto it = start_order_.rbegin(); it != start_order_.rend(); it++) {
     auto instance = started_modules_.find(*it);
     ASSERT(instance != started_modules_.end());
 
+    // Clear the handler before stopping the module to allow it to shut down gracefully.
+    instance->second->handler_->Clear();
+    instance->second->handler_->WaitUntilStopped(kModuleStopTimeout);
     instance->second->Stop();
 
     delete instance->second->handler_;
