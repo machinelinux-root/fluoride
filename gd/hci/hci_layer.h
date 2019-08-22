@@ -19,10 +19,10 @@
 #include <chrono>
 #include <map>
 
-#include "common/address.h"
+#include "address.h"
+#include "class_of_device.h"
 #include "common/bidi_queue.h"
 #include "common/callback.h"
-#include "common/class_of_device.h"
 #include "hal/hci_hal.h"
 #include "hci/hci_packets.h"
 #include "module.h"
@@ -49,6 +49,11 @@ class HciLayer : public Module {
                                     os::Handler* handler);
 
   virtual void UnregisterEventHandler(EventCode event_code);
+
+  virtual void RegisterLeEventHandler(SubeventCode subevent_code, common::Callback<void(LeMetaEventView)> event_handler,
+                                      os::Handler* handler);
+
+  virtual void UnregisterLeEventHandler(SubeventCode subevent_code);
 
   static const ModuleFactory Factory;
 

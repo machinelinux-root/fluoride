@@ -177,7 +177,7 @@ class DependsOnHci : public Module {
   }
 
   std::future<void> GetReceivedAclFuture() {
-    ASSERT_LOG(event_promise_ == nullptr, "Promises promises ... Only one at a time");
+    ASSERT_LOG(acl_promise_ == nullptr, "Promises promises ... Only one at a time");
     acl_promise_ = std::make_unique<std::promise<void>>();
     return acl_promise_->get_future();
   }
@@ -197,6 +197,9 @@ class DependsOnHci : public Module {
     hci_->RegisterEventHandler(EventCode::CONNECTION_COMPLETE,
                                common::Bind(&DependsOnHci::handle_event<EventPacketView>, common::Unretained(this)),
                                GetHandler());
+    hci_->RegisterLeEventHandler(SubeventCode::CONNECTION_COMPLETE,
+                                 common::Bind(&DependsOnHci::handle_event<LeMetaEventView>, common::Unretained(this)),
+                                 GetHandler());
     hci_->GetAclQueueEnd()->RegisterDequeue(GetHandler(),
                                             common::Bind(&DependsOnHci::handle_acl, common::Unretained(this)));
   }
@@ -307,6 +310,31 @@ class HciTest : public ::testing::Test {
 };
 
 TEST_F(HciTest, initAndClose) {}
+
+TEST_F(HciTest, leMetaEvent) {
+  auto event_future = upper->GetReceivedEventFuture();
+
+  // Send an LE event
+  ErrorCode status = ErrorCode::SUCCESS;
+  uint16_t handle = 0x123;
+  Role role = Role::MASTER;
+  PeerAddressType peer_address_type = PeerAddressType::RANDOM_DEVICE_OR_IDENTITY_ADDRESS;
+  Address peer_address = Address::kAny;
+  uint16_t conn_interval = 0x0ABC;
+  uint16_t conn_latency = 0x0123;
+  uint16_t supervision_timeout = 0x0B05;
+  MasterClockAccuracy master_clock_accuracy = MasterClockAccuracy::PPM_50;
+  hal->callbacks->hciEventReceived(GetPacketBytes(
+      LeConnectionCompleteBuilder::Create(status, handle, role, peer_address_type, peer_address, conn_interval,
+                                          conn_latency, supervision_timeout, master_clock_accuracy)));
+
+  // Wait for the event
+  auto event_status = event_future.wait_for(kTimeout);
+  ASSERT_EQ(event_status, std::future_status::ready);
+
+  auto event = upper->GetReceivedEvent();
+  ASSERT(LeConnectionCompleteView::Create(LeMetaEventView::Create(EventPacketView::Create(event))).IsValid());
+}
 
 TEST_F(HciTest, noOpCredits) {
   ASSERT_EQ(0, hal->GetNumSentCommands());
@@ -453,8 +481,8 @@ TEST_F(HciTest, creditsTest) {
 TEST_F(HciTest, createConnectionTest) {
   // Send CreateConnection to the controller
   auto command_future = hal->GetSentCommandFuture();
-  common::Address bd_addr;
-  ASSERT_TRUE(common::Address::FromString("A1:A2:A3:A4:A5:A6", bd_addr));
+  Address bd_addr;
+  ASSERT_TRUE(Address::FromString("A1:A2:A3:A4:A5:A6", bd_addr));
   uint16_t packet_type = 0x1234;
   PageScanRepetitionMode page_scan_repetition_mode = PageScanRepetitionMode::R0;
   uint16_t clock_offset = 0x3456;
@@ -555,8 +583,8 @@ TEST_F(HciTest, createConnectionTest) {
 }
 
 TEST_F(HciTest, receiveMultipleAclPackets) {
-  common::Address bd_addr;
-  ASSERT_TRUE(common::Address::FromString("A1:A2:A3:A4:A5:A6", bd_addr));
+  Address bd_addr;
+  ASSERT_TRUE(Address::FromString("A1:A2:A3:A4:A5:A6", bd_addr));
   uint16_t handle = 0x0001;
   uint16_t num_packets = 100;
   PacketBoundaryFlag packet_boundary_flag = PacketBoundaryFlag::COMPLETE_PDU;
